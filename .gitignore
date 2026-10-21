@@ -1,0 +1,61 @@
+# ──────────────────────────────────────────────────────────────
+#  AI-web-bridge  —  .gitignore
+#  Keeps secrets, personal data, and build artefacts out of git
+# ──────────────────────────────────────────────────────────────
+
+# ── Secrets & credentials ──────────────────────────────────────
+.env
+mcp_config.json
+*.key
+*.pem
+*.p12
+*.secret
+
+# ── Chrome automation profiles (contain cookies / login sessions) ──
+.chrome_profile/
+ArgonChromeProfile/
+ChromeProfile/
+chrome-*/
+*-chrome-profile/
+
+# ── Bridge output files (personal, not source) ─────────────────
+response.md
+_argon_response.md
+_argon_prompt.txt
+prompt.txt
+argon_answer.md
+debug_gemini.png
+stitch_debug.png
+stitch_landing.png
+
+# ── Stitch design output (downloaded, not source) ──────────────
+design/stitch/*.html
+design/stitch/*.png
+design/stitch/*.jpg
+.stitch/
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+*.egg-info/
+dist/
+build/
+wheels/
+.venv/
+venv/
+env/
+.python-version
+
+# ── Node ───────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# ── OS & editor ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
+*.log
