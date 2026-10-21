@@ -46,6 +46,34 @@ just set your `STITCH_API_KEY`.
 
 ---
 
+## 💡 How It Drastically Reduces CLI Token Usage & Costs
+
+### Does it *really* save tokens? **Yes, significantly.**
+
+When using AI coding assistants (Antigravity, Cursor, Aider, Claude Code), you pay for both **input tokens** (context, chat history, file dumps) and **output tokens** (generated code, explanations, deep reasoning traces). These costs escalate rapidly with frontier models like Claude 3.7 Sonnet, OpenAI o1/o3-mini, or Gemini 1.5 Pro.
+
+Here is exactly how AI Web Bridge cuts your token consumption and billing:
+
+#### 1. Zero-Cost Heavy Reasoning & Generation
+- **Without the bridge:** Your CLI model must generate full 500+ line components, documentation, and multi-step plans. A single deep refactor or debug session can burn 10,000 to 50,000+ output and reasoning tokens.
+- **With the bridge:** You offload that heavy generation to the web interface (Gemini Advanced / Argon, Claude Web, ChatGPT). The web model performs the deep thinking and code drafting for **$0 per token**, using your existing web subscription or free tier.
+
+#### 2. The "Brain & Hands" Architecture (Use Cheap/Fast Models in CLI)
+- Configure your CLI to run an extremely cheap, fast model (e.g. `Claude 3.5 Haiku`, `Gemini Flash`, `GPT-4o-mini`, or even local models via Ollama) to act as the **orchestrator** ("the hands").
+- The CLI merely coordinates file reading, running terminal commands, and passing prompts to the bridge.
+- The web browser model acts as the **frontier brain** ("the architect").
+- **Result:** You get frontier-grade intelligence while paying tiny token fees for simple tool orchestration.
+
+#### 3. Preventing Context Window Bloat
+- When debugging complex errors over multiple turns, CLI chat histories balloon, forcing you to pay for re-sending thousands of tokens on every single prompt.
+- With the bridge, multi-turn exploration and iterative debugging happen inside the browser chat session. Your CLI only ingests the final, validated code snippet into your repository, keeping the local context window lean and cheap.
+
+#### 4. Flat-Rate / Free Quotas vs. Per-Token Metering
+- Web AI models operate under flat monthly subscriptions ($20/mo) or generous free daily limits with no per-token metering.
+- CLI APIs charge strictly per million tokens. Offloading 80–90% of token volume to web sessions eliminates surprise API bills.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
