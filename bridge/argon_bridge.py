@@ -90,7 +90,9 @@ def _session_profile_scope(provider_config: dict, settings: dict) -> str | None:
     profile = Path(settings["profile"]).expanduser().resolve()
     if browser_name == "chrome" and profile == default_profile and settings.get("profile_directory") in (None, "Default"):
         return None
-    directory = settings.get("profile_directory") or "Default"
+    directory = settings.get("profile_directory")
+    if directory in (None, "Default"):
+        return f"{browser_name}:{profile}"
     return f"{browser_name}:{profile}:{directory}"
 
 
