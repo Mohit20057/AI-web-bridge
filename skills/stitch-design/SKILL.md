@@ -170,8 +170,9 @@ This saves:
 
 | CLI | How to use this skill |
 |---|---|
-| **Antigravity** | Drop this file in `~/.gemini/config/skills/stitch-design/SKILL.md` |
-| **Cursor** | Paste the rules section into `.cursorrules` |
+| **Gemini CLI / Cursor** | Install this folder in `.agents/skills/stitch-design/` |
+| **Claude Code** | Install this folder in `.claude/skills/stitch-design/` |
+| **Aider** | Load the relevant instructions with `aider --read` when needed |
 | **Claude Code** | Paste the rules section into `CLAUDE.md` |
 | **Plain script** | Run `stitch_client.py` directly from terminal |
 

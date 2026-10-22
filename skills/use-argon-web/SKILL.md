@@ -1,144 +1,74 @@
 ---
 name: use-argon-web
 description: |
-  Delegate queries, coding tasks, architecture designs, multi-turn reasoning,
-  and debugging to a web-based AI model (Gemini Argon, Claude, ChatGPT, etc.)
-  running in your own logged-in browser — no API key required.
-  Activate whenever the user says:
-  - "use argon web"
-  - "ask argon"
-  - "use argon"
-  - "run through argon"
-  - "query argon"
-  - or wants to consult a web-only frontier model.
+  Delegate a question or coding task to a configured browser-based Gemini,
+  ChatGPT, or Claude session through AI Web Bridge. Activate when the user says
+  "use argon", "ask argon", "use argon web", or asks to consult browser AI.
 license: Apache-2.0
 metadata:
-  version: v2
+  version: v5
   author: Mohit20057
   repo: https://github.com/Mohit20057/AI-web-bridge
 ---
 
-# Use Web AI Bridge (Argon / Claude / ChatGPT)
+# Use AI Web Bridge
 
-This skill delegates reasoning, code generation, and debugging to a **web-based
-AI model** through the user's own browser session via Playwright CDP automation.
-No API keys. No billing. Uses your existing logged-in session.
+Send substantial reasoning or drafting to the selected browser AI. Keep CLI
+context, returned text, and round trips small; savings depend on the task.
 
----
+## Rules
 
-## Prerequisites
+- Use one provider by default. Preserve that provider's chat for follow-ups. A
+  different provider cannot see the old provider's history, so give it a small
+  handoff packet.
+- Never send the full CLI transcript, repository, or unchanged files. Include
+  only the task, relevant changes/errors, constraints, and selected excerpts.
+- Ask for a concise answer, focused diff, or exact replacement. Read only the
+  output needed to apply the answer; do not restate its reasoning.
+- Use `--providers` or `--all` only when the user requests multiple opinions.
+  Every selected site receives the same context and provider use increases.
+  Prefer `--compare-provider` over loading all answers into CLI context.
+- Include only content appropriate to send to a web service. The bridge filters
+  common secret-looking paths, but does not scan ordinary file contents.
+- Do not create or update durable project memory unless the user requests it.
 
-1. **Python 3.11+** with `playwright` installed:
-   ```bash
-   pip install playwright
-   playwright install chromium
+## Workflow
+
+1. Resolve `BRIDGE_SCRIPT` to the repository's `bridge/argon_bridge.py`.
+   Setup and browser-specific options are in the repository README.
+2. For project work, prepare `_argon_context.json` with `version: 1`, a short
+   `task`, and only necessary `project_summary`, `recent_changes`, `files`,
+   `errors`, `constraints`, or `requested_output` fields. Use selected snippets
+   or focused diffs; don't inspect more files just to fill the packet. For a
+   simple question, use `_argon_prompt.txt` or `--prompt`.
+3. If review is needed, run `python "$BRIDGE_SCRIPT" --context-file _argon_context.json --review-context`.
+   This prints the exact payload and does not contact a provider.
+4. Send one request and save the result:
+
+   ```sh
+   python "$BRIDGE_SCRIPT" --context-file _argon_context.json --out _argon_response.md
    ```
 
-2. **Chrome running with remote debugging** — launch it once with:
-   ```bash
-   # Windows
-   bridge\launch_chrome.bat
+   For a simple prompt, use `--prompt-file _argon_prompt.txt`. To start fresh,
+   add `--new-chat`. Select a provider with `--provider NAME`; inspect visible
+   models using `--provider NAME --list-models`, then use `--model LABEL` only
+   when the user wants a specific available model. Use repeated
+   `--provider-model ID=LABEL` for different models in an explicit fan-out.
+5. Read the concise response, apply or present it, and stop. Make one focused
+   follow-up only if the result is incomplete, an error needs diagnosis, or the
+   user asks. Clean temporary packet/prompt/response files when the task ends.
 
-   # Mac / Linux
-   bash bridge/launch_chrome.sh
-   ```
-   Then log in to your target web AI (e.g. `gemini.google.com`) in that window.
+For an explicitly requested multi-provider run, use
+`--providers gemini,chatgpt` or `--all`. The bridge saves one result per site
+and prints a status summary. Add `--compare-provider NAME` only when synthesis
+helps; its bounded comparison is saved separately.
 
-3. **Environment variables** (put in `.env` or export before running):
-   | Variable | Default | Description |
-   |---|---|---|
-   | `CHROME_PROFILE_DIR` | `~/ArgonChromeProfile` | Chrome profile with saved session |
-   | `CHROME_DEBUG_PORT` | `9222` | CDP port Chrome is listening on |
-   | `BRIDGE_SCRIPT` | `bridge/argon_bridge.py` | Path to the bridge script |
+## Browser-only use
 
----
+Browser AI websites do not load this skill, local CLI history, or repository
+files. A browser-only user must prepare or review a compact prompt/context
+packet locally, paste it into the website, and carry the answer back manually.
+No cross-site history or local-file access is implied.
 
-## CRITICAL RULES (Read Every Time)
-
-1. **MULTI-TURN PERSISTENCE — DO NOT STOP AFTER 1 OUTPUT**
-   - When the user asks to use the web AI for a task, enter **Web-AI-Assisted Mode**.
-   - For multi-step tasks, follow-up questions, or code-then-test cycles, **continue
-     consulting the web AI for every subsequent step or error**.
-   - Do NOT stop after 1 output or revert to answering alone unless the user
-     explicitly says to exit this mode.
-
-2. **SESSION CONTINUITY**
-   - **New unrelated task**: pass `--new-chat` to start a fresh conversation thread.
-   - **Follow-up / sub-step**: **omit `--new-chat`** so the web AI remembers the
-     previous code, context, and discussion.
-
-3. **SELF-HEALING ERROR LOOP**
-   - If code from the web AI fails with an error, do NOT give up or rewrite yourself.
-   - Capture the full traceback, form a debugging prompt
-     (*"Your previous solution gave this error: [traceback]. Please fix it."*),
-     and call the bridge again.
-
-4. **ONE TRUSTED BRIDGE**
-   - Always invoke via the `BRIDGE_SCRIPT` path (resolved from env var or project root).
-
----
-
-## Execution Workflow
-
-### Step 1 — Formulate the Prompt
-
-The web AI cannot see your local files. Bundle into a single message:
-- The user's exact request
-- Relevant code snippets or schema
-- Any error messages or terminal logs
-- Key constraints (language, framework, token budget)
-
-Write the prompt to `_argon_prompt.txt` in the workspace root.
-
-### Step 2 — Clean Stage & Execute
-
-Always delete stale output first:
-```bash
-# Windows PowerShell
-Remove-Item -Path "_argon_response.md" -Force -ErrorAction SilentlyContinue
-
-# Mac / Linux
-rm -f _argon_response.md
-```
-
-Run the bridge:
-```bash
-# Follow-up / multi-turn step (DEFAULT — keeps conversation alive):
-python "$BRIDGE_SCRIPT" --prompt-file _argon_prompt.txt --out _argon_response.md
-
-# Brand-new topic:
-python "$BRIDGE_SCRIPT" --prompt-file _argon_prompt.txt --new-chat --out _argon_response.md
-```
-
-Where `$BRIDGE_SCRIPT` is the absolute path to `bridge/argon_bridge.py`
-(or wherever you cloned this repo).
-
-### Step 3 — Handle Chrome Connection Errors
-
-If the bridge reports Chrome is not reachable on port 9222:
-1. Launch Chrome: run `bridge/launch_chrome.bat` (Windows) or `bridge/launch_chrome.sh`.
-2. Confirm the user is logged into the target web AI.
-3. Re-run the bridge command.
-
-### Step 4 — Apply & Continue
-
-1. Read `_argon_response.md`.
-2. Apply code changes or present the answer to the user.
-3. If the user asks a follow-up, or the next plan step needs execution,
-   **immediately go back to Step 1 for the next turn** — do not stop.
-4. Delete temp files (`_argon_prompt.txt`, `_argon_response.md`) only when the
-   entire task is fully complete.
-
----
-
-## Adapter Notes for Other CLIs
-
-| CLI | How to use this skill |
-|---|---|
-| **Antigravity** | Drop this file in `~/.gemini/config/skills/use-argon-web/SKILL.md` |
-| **Cursor** | Paste the rules section into `.cursorrules` |
-| **Claude Code** | Paste the rules section into `CLAUDE.md` |
-| **Aider** | `aider --read bridge/argon_bridge.py --read _argon_response.md` |
-| **Plain script** | `python bridge/argon_bridge.py --prompt-file prompt.txt --out out.md` |
-
-See [`SKILL_SPEC.md`](../../SKILL_SPEC.md) for the full adapter guide.
+See [SKILL_SPEC.md](../../SKILL_SPEC.md) for per-CLI installation paths and the
+common invocation examples.

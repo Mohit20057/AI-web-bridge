@@ -1,0 +1,98 @@
+{
+  "default_provider": "gemini",
+  "providers": {
+    "gemini": {
+      "adapter": "providers.gemini:GeminiProvider",
+      "name": "Gemini",
+      "url": "https://gemini.google.com/app",
+      "browser": {
+        "default_browser": "chrome",
+        "engine": "chromium",
+        "connection": "cdp",
+        "port_env": "GEMINI_CDP_PORT",
+        "default_port": 9222,
+        "profile_env": "CHROME_PROFILE_DIR",
+        "default_profile": "~/ArgonChromeProfile",
+        "edge_default_profile": "~/ArgonEdgeProfile"
+      },
+      "timeouts": {
+        "login_seconds": 120,
+        "response_seconds": 300,
+        "response_stable_seconds": 2.5
+      },
+      "selectors": {
+        "input": "rich-textarea div[contenteditable='true'], div[contenteditable='true'][role='textbox'], div.ql-editor[contenteditable='true'], div[contenteditable='true'], textarea",
+        "send_btn": "button[aria-label*='Send message' i], button[aria-label*='Send' i], button.send-button, button[mattooltip*='Send' i], button[aria-label*='Submit' i]",
+        "stop_btn": "button[aria-label*='Stop' i], button[aria-label*='stop generating' i], button[aria-label*='stop response' i]",
+        "response_container": "model-response, .model-response, [data-test-id='model-response']",
+        "response_content": "message-content, .model-response-text, .markdown",
+        "copy_btn": "button[aria-label*='Copy' i], button[data-test-id='copy-button'], button[mattooltip*='Copy' i]",
+        "model_btn": "[data-test-id='bard-mode-menu-button'], button[aria-label*='model' i], button[aria-label*='mode' i], div.model-picker-container button",
+        "menu_item": "[role='menuitem'], [role='option'], .mat-mdc-menu-item, button[mat-menu-item]",
+        "new_chat": "a[href='/app'][aria-label*='New chat' i], button[aria-label*='New chat' i], a[data-test-id='new-chat-button'], div[aria-label*='New chat' i]"
+      }
+    },
+    "chatgpt": {
+      "adapter": "providers.chatgpt:ChatGPTProvider",
+      "name": "ChatGPT",
+      "url": "https://chatgpt.com/",
+      "login_hint": "sign in to ChatGPT at chatgpt.com",
+      "browser": {
+        "default_browser": "chrome",
+        "engine": "chromium",
+        "connection": "cdp",
+        "port_env": "CHATGPT_CDP_PORT",
+        "default_port": 9223,
+        "profile_env": "CHATGPT_PROFILE_DIR",
+        "default_profile": "~/AIWebBridgeChatGPTProfile",
+        "edge_default_profile": "~/AIWebBridgeEdgeChatGPTProfile"
+      },
+      "timeouts": {
+        "login_seconds": 120,
+        "response_seconds": 300,
+        "response_stable_seconds": 2.5
+      },
+      "selectors": {
+        "input": "#prompt-textarea, div[contenteditable='true'][role='textbox'], div[contenteditable='true']",
+        "send_btn": "button[data-testid='send-button'], button[aria-label*='Send prompt' i], button[aria-label*='Send message' i]",
+        "stop_btn": "button[data-testid='stop-button'], button[aria-label*='Stop generating' i], button[aria-label*='Stop response' i]",
+        "response_container": "[data-message-author-role='assistant']",
+        "response_content": ".markdown, .prose",
+        "model_btn": "button[data-testid*='model-switcher' i], button[aria-label*='model' i]",
+        "menu_item": "div[role='menu'] button, [role='menuitem'], [role='menuitemradio'], [role='option']",
+        "new_chat": "button[data-testid='create-new-chat-button'], button[aria-label*='New chat' i], a[aria-label*='New chat' i]"
+      }
+    },
+    "claude": {
+      "adapter": "providers.claude:ClaudeProvider",
+      "name": "Claude",
+      "url": "https://claude.ai/new",
+      "login_hint": "sign in to Claude at claude.ai",
+      "browser": {
+        "default_browser": "chrome",
+        "engine": "chromium",
+        "connection": "cdp",
+        "port_env": "CLAUDE_CDP_PORT",
+        "default_port": 9224,
+        "profile_env": "CLAUDE_PROFILE_DIR",
+        "default_profile": "~/AIWebBridgeClaudeProfile",
+        "edge_default_profile": "~/AIWebBridgeEdgeClaudeProfile"
+      },
+      "timeouts": {
+        "login_seconds": 120,
+        "response_seconds": 300,
+        "response_stable_seconds": 2.5
+      },
+      "selectors": {
+        "input": "div[contenteditable='true'][data-placeholder], div.ProseMirror[contenteditable='true'], div[contenteditable='true'], textarea",
+        "send_btn": "button[aria-label*='Send message' i], button[aria-label*='Send' i], button[data-testid*='send' i]",
+        "stop_btn": "button[aria-label*='Stop response' i], button[aria-label*='Stop' i], button[data-testid*='stop' i]",
+        "response_container": "[data-testid='chat-message-content'], div.font-claude-message",
+        "response_content": ".standard-markdown, .markdown, [data-testid='message-content']",
+        "model_btn": "button[data-testid*='model' i], button[aria-label*='model' i], button:has-text('Sonnet'), button:has-text('Opus')",
+        "menu_item": "div[role='menu'] button, [role='menuitem'], [role='menuitemradio'], [role='option']",
+        "new_chat": "a[href='/new'], button[aria-label*='New chat' i]"
+      }
+    }
+  }
+}

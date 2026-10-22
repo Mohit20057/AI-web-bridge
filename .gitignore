@@ -14,6 +14,8 @@ mcp_config.json
 # ── Chrome automation profiles (contain cookies / login sessions) ──
 .chrome_profile/
 ArgonChromeProfile/
+ArgonEdgeProfile/
+AIWebBridge*Profile/
 ChromeProfile/
 chrome-*/
 *-chrome-profile/
@@ -21,10 +23,16 @@ chrome-*/
 # ── Bridge output files (personal, not source) ─────────────────
 response.md
 _argon_response.md
+_argon_response_*.md
+_argon_comparison_*.md
+_argon_response.*.response.md
+_argon_response.*.comparison.md
 _argon_prompt.txt
+_argon_context.json
 prompt.txt
 argon_answer.md
 debug_gemini.png
+debug_*.png
 stitch_debug.png
 stitch_landing.png
 
@@ -59,3 +67,6 @@ Thumbs.db
 .idea/
 .vscode/settings.json
 *.log
+
+# ── Per-project bridge session metadata ────────────────────────
+.ai-web-bridge/

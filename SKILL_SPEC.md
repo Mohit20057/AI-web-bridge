@@ -22,8 +22,10 @@ The `SKILL.md` file tells the AI agent:
 - **How** to call supporting scripts
 - **What rules** govern multi-turn behavior
 
-Skills are loaded by the CLI at runtime, not baked into the model — so they
-work with any LLM that can read context files.
+Skills are loaded by a compatible coding CLI at runtime, not baked into a
+model. A browser AI website does not read a local `SKILL.md`; browser-only use
+means manually pasting a compact prompt/context packet and carrying the answer
+back yourself.
 
 ---
 
@@ -72,123 +74,135 @@ Brief description of what this skill does.
 
 ---
 
-## Adapting to Each CLI
+## CLI integration
 
-### Antigravity (Google)
-
-1. Copy the skill folder into `~/.gemini/config/skills/`:
-   ```bash
-   cp -r skills/use-argon-web ~/.gemini/config/skills/
-   ```
-2. The CLI reads `SKILL.md` automatically when trigger phrases appear in chat.
-3. The `description.Activate when the user says:` block controls activation.
-
-### Cursor
-
-Cursor uses `.cursorrules` (plain text) loaded into every prompt:
-
-```markdown
-## Web AI Bridge Rules
-
-When the user says "use argon" or "ask argon":
-1. Write their request to `_argon_prompt.txt`.
-2. Run: `python bridge/argon_bridge.py --prompt-file _argon_prompt.txt --out _argon_response.md`
-3. Read `_argon_response.md` and apply the answer.
-4. For follow-ups, omit `--new-chat` to keep context.
-5. Feed errors back to the bridge — don't rewrite the code yourself.
-```
-
-Paste the **CRITICAL RULES** and **Execution Workflow** sections from the
-relevant `SKILL.md` into `.cursorrules`.
-
-### Claude Code
-
-Claude Code reads `CLAUDE.md` at the project root before every task.
-Same approach as Cursor — paste the rules section into `CLAUDE.md`:
-
-```markdown
-<!-- CLAUDE.md -->
-## Web AI Bridge
-
-[paste CRITICAL RULES and Execution Workflow from SKILL.md here]
-```
-
-### Aider
-
-Pass skill files with `--read` so Aider includes them in its context:
-
-```bash
-aider \
-  --read bridge/argon_bridge.py \
-  --read skills/use-argon-web/SKILL.md \
-  --read _argon_response.md \
-  your_file.py
-```
-
-Aider will follow the workflow instructions in SKILL.md for the current session.
-
-### Continue.dev
-
-Add the skill content to your Continue system prompt in
-`.continue/config.json`:
-
-```json
-{
-  "systemMessage": "...[paste CRITICAL RULES + Execution Workflow here]..."
-}
-```
+The stable bridge entry point is `python bridge/argon_bridge.py`. Its arguments
+are CLI-neutral; each coding tool only needs a way to load the skill and run a
+shell command. `BRIDGE_SCRIPT` may point to an absolute path when the project
+root is not the current directory.
 
 ### Gemini CLI
 
-Pass the skill as a context file:
+Gemini CLI supports Agent Skills. Install the skill in a workspace discovery
+directory:
 
 ```bash
-gemini -f skills/use-argon-web/SKILL.md "use argon to explain this code"
+# Windows PowerShell
+New-Item -ItemType Directory -Force .agents/skills | Out-Null
+Copy-Item -Recurse skills/use-argon-web .agents/skills/
+
+# macOS / Linux
+mkdir -p .agents/skills
+cp -R skills/use-argon-web .agents/skills/
 ```
 
-### Plain Python / No CLI
+Then invoke `/use-argon-web` or let Gemini CLI activate it when relevant. A
+user-level install can use `~/.agents/skills/`. Gemini CLI also supports
+`gemini skills install` for repositories or local skill paths; see its current
+[Agent Skills guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md).
 
-Call the bridge directly without any CLI:
+### Claude Code
 
-```python
-import subprocess, pathlib
+Install a project skill at `.claude/skills/use-argon-web/SKILL.md`:
 
-pathlib.Path("_argon_prompt.txt").write_text("Your prompt here")
+```bash
+# Windows PowerShell
+New-Item -ItemType Directory -Force .claude/skills | Out-Null
+Copy-Item -Recurse skills/use-argon-web .claude/skills/
 
-subprocess.run([
-    "python", "bridge/argon_bridge.py",
-    "--prompt-file", "_argon_prompt.txt",
-    "--out", "_argon_response.md",
-])
-
-answer = pathlib.Path("_argon_response.md").read_text()
-print(answer)
+# macOS / Linux
+mkdir -p .claude/skills
+cp -R skills/use-argon-web .claude/skills/
 ```
+
+Invoke `/use-argon-web`, or keep the skill in the repository and use it where
+Claude Code discovers project skills. Personal skills can be copied beneath
+`~/.claude/skills/`. See [Claude Code Skills](https://code.claude.com/docs/en/skills).
+
+### Cursor
+
+Cursor discovers Agent Skills under `.agents/skills/` and `.cursor/skills/`.
+For a project install, use:
+
+```bash
+# Windows PowerShell
+New-Item -ItemType Directory -Force .agents/skills | Out-Null
+Copy-Item -Recurse skills/use-argon-web .agents/skills/
+
+# macOS / Linux
+mkdir -p .agents/skills
+cp -R skills/use-argon-web .agents/skills/
+```
+
+Use `/use-argon-web` or attach it with `@`. Avoid making this workflow an
+always-loaded user rule; keeping it on-demand uses fewer context tokens. See
+[Cursor Skills](https://cursor.com/help/customization/skills).
+
+### Aider
+
+Aider's documented workflow is to read selected instruction or result files;
+it does not use this repository's skill activation protocol. Avoid loading the
+full skill on every run. Compose the compact packet and invoke the bridge, then
+read only the response you need:
+
+```bash
+python bridge/argon_bridge.py --context-file _argon_context.json --out _argon_response.md
+aider --read _argon_response.md
+```
+
+Use `aider --read skills/use-argon-web/SKILL.md` only for a session that needs
+the complete workflow instructions. See [Aider conventions](https://aider.chat/docs/usage/conventions.html).
+
+### Plain script or another CLI
+
+Any tool that can write a UTF-8 prompt/context file, run Python, and read an
+output can use the same contract:
+
+```bash
+python bridge/argon_bridge.py --context-file _argon_context.json --out _argon_response.md
+```
+
+Use `--prompt-file` for a simple question. For an explicitly requested fan-out,
+use `--providers gemini,chatgpt` or `--all`; keep the default single-provider
+path to limit usage.
+
+### Browser-only user
+
+There is no automatic skill installation inside Gemini, ChatGPT, Claude, or
+another browser AI website. Prepare or review the packet locally with
+`--review-context`, paste only the resulting task context into the website, and
+copy its answer back. The website cannot access local files or another site's
+history unless the user manually provides that information.
+
+The packet schema and review/logging behavior are documented in
+[CONTEXT_PACKET.md](CONTEXT_PACKET.md). Multi-provider mode remains opt-in:
+each site receives the same context and total provider usage increases.
 
 ---
 
-## Adding a New Web AI Target
+## Adding a New Browser AI Provider
 
-The bridge script (`bridge/argon_bridge.py`) uses a `SELECTORS` dictionary
-that maps target names to CSS selectors for that site's chat UI.
+The bridge reads provider metadata from `bridge/providers.json` and loads the
+provider's adapter class from `bridge/providers/`. Gemini, ChatGPT, and Claude
+adapters are configured. A provider is not enabled by adding selectors alone;
+its adapter must implement the provider-specific chat lifecycle:
 
-To add a new target:
+- `open_or_resume_chat(context, chat_url, new_chat)`
+- `wait_for_login(page, timeout)`
+- `list_models(page)` and `select_model(page, model_name)`
+- `send_prompt(page, prompt_text)`
+- `get_response_elements(page)` and `wait_for_response(page, initial_count, timeout)`
+- `close()`
 
-1. Open `bridge/argon_bridge.py` and locate the `SELECTORS` dict.
-2. Inspect the target site's DOM to find:
-   - The text input selector (textarea or contenteditable div)
-   - The send button selector
-   - The response container selector
-3. Add your entry:
-   ```python
-   SELECTORS["my-ai"] = {
-       "url": "https://my-ai.example.com/chat",
-       "input": "textarea#chat-input",
-       "send_btn": "button[data-testid='send']",
-       "response": "div.message.assistant",
-   }
-   ```
-4. Use it: `python bridge/argon_bridge.py --target my-ai --prompt-file p.txt`
+Add a provider entry with its adapter import path, URL, Chromium/CDP defaults,
+timeouts, and selectors. Then implement and verify the adapter against that
+provider's current signed-in UI. Select a configured provider with
+`--provider NAME`; use `--list-providers` to list adapters and
+`--provider NAME --list-models` to inspect model labels shown to that account.
+`--model LABEL` must match one visible option and the selected label must be
+confirmed before the prompt is submitted. For fan-out, `--providers` and `--all`
+run sequentially and save distinct outputs; the same context is sent to each
+selected provider. See [multi-provider usage](README.md#multi-provider-runs).
 
 ---
 
