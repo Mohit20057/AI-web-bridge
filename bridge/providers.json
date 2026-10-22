@@ -12,6 +12,7 @@
         "port_env": "GEMINI_CDP_PORT",
         "default_port": 9222,
         "profile_env": "CHROME_PROFILE_DIR",
+        "edge_profile_env": "EDGE_PROFILE_DIR",
         "default_profile": "~/ArgonChromeProfile",
         "edge_default_profile": "~/ArgonEdgeProfile"
       },
@@ -44,6 +45,7 @@
         "port_env": "CHATGPT_CDP_PORT",
         "default_port": 9223,
         "profile_env": "CHATGPT_PROFILE_DIR",
+        "edge_profile_env": "EDGE_PROFILE_DIR",
         "default_profile": "~/AIWebBridgeChatGPTProfile",
         "edge_default_profile": "~/AIWebBridgeEdgeChatGPTProfile"
       },
@@ -75,6 +77,7 @@
         "port_env": "CLAUDE_CDP_PORT",
         "default_port": 9224,
         "profile_env": "CLAUDE_PROFILE_DIR",
+        "edge_profile_env": "EDGE_PROFILE_DIR",
         "default_profile": "~/AIWebBridgeClaudeProfile",
         "edge_default_profile": "~/AIWebBridgeEdgeClaudeProfile"
       },

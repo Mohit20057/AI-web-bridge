@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from browser_profiles import default_user_data_dir
+
 
 CONFIG_PATH = Path(__file__).resolve().with_name("providers.json")
 
@@ -58,14 +60,24 @@ def browser_settings(provider: dict[str, Any]) -> dict[str, Any]:
     browser_name = os.environ.get("BROWSER", browser.get("default_browser", "chrome")).lower()
     if browser_name not in {"chrome", "edge"}:
         raise ConfigurationError(f"Unsupported BROWSER '{browser_name}'. Phase 2 supports chrome or edge.")
+    profile_env = browser.get("edge_profile_env") if browser_name == "edge" else browser["profile_env"]
+    profile_override = os.environ.get("BROWSER_PROFILE_DIR") or os.environ.get(profile_env)
+    profile_directory = os.environ.get("BROWSER_PROFILE_NAME")
+    if profile_directory and (
+        profile_directory in {".", ".."}
+        or Path(profile_directory).name != profile_directory
+        or "/" in profile_directory
+        or "\\" in profile_directory
+    ):
+        raise ConfigurationError("BROWSER_PROFILE_NAME must be one folder name, such as 'Default' or 'Profile 1'.")
     provider_port = os.environ.get(browser["port_env"])
-    shared_profile = os.environ.get("BROWSER_PROFILE_DIR")
-    if provider_port:
-        port_default = provider_port
-    elif shared_profile:
+    shared_profile = os.environ.get("BROWSER_PROFILE_DIR") or (profile_directory and not profile_override)
+    if shared_profile:
         # A shared profile must use one shared browser endpoint to avoid
         # launching concurrent browser processes against the same profile.
         port_default = os.environ.get("CDP_PORT", "9222")
+    elif provider_port:
+        port_default = provider_port
     elif browser["port_env"] == "GEMINI_CDP_PORT":
         port_default = os.environ.get("CDP_PORT") or os.environ.get("CHROME_DEBUG_PORT") or str(browser["default_port"])
     else:
@@ -81,10 +93,15 @@ def browser_settings(provider: dict[str, Any]) -> dict[str, Any]:
     if browser_name == "edge":
         default_profile = browser.get("edge_default_profile", "~/ArgonEdgeProfile")
     profile_default = os.path.expanduser(default_profile)
-    profile_override = (
-        os.environ.get("BROWSER_PROFILE_DIR")
-        or os.environ.get(browser["profile_env"])
-    )
+    if profile_directory and not profile_override:
+        profile_default = str(default_user_data_dir(browser_name))
     profile = Path(profile_override or profile_default).expanduser().resolve()
     executable = os.environ.get("BROWSER_EXE")
-    return {"name": browser_name, "host": host, "port": port, "profile": profile, "executable": executable}
+    return {
+        "name": browser_name,
+        "host": host,
+        "port": port,
+        "profile": profile,
+        "profile_directory": profile_directory,
+        "executable": executable,
+    }

@@ -91,23 +91,23 @@ Call the following tools directly if they are available:
 *(Tools may have prefixes such as `mcp__stitch__` depending on your CLI.)*
 
 ### Option B — CLI Script (always available)
-Use `skills/stitch-design/scripts/stitch_client.py` (set `STITCH_API_KEY` first):
+Use `scripts/stitch_client.py` (set `STITCH_API_KEY` first):
 
 ```bash
 # List projects
-python skills/stitch-design/scripts/stitch_client.py list
+python scripts/stitch_client.py list
 
 # Create project
-python skills/stitch-design/scripts/stitch_client.py create --title "My App"
+python scripts/stitch_client.py create --title "My App"
 
 # Generate screen
-python skills/stitch-design/scripts/stitch_client.py generate \
+python scripts/stitch_client.py generate \
     --project-id "<PROJECT_ID>" \
     --prompt "<PROMPT>" \
     --device DESKTOP
 
 # List screens
-python skills/stitch-design/scripts/stitch_client.py screens --project-id "<PROJECT_ID>"
+python scripts/stitch_client.py screens --project-id "<PROJECT_ID>"
 ```
 
 ---
@@ -125,7 +125,7 @@ python skills/stitch-design/scripts/stitch_client.py screens --project-id "<PROJ
 
 ### Step 2 — Formulate Stitch Prompts
 Write high-fidelity prompts using the template at:
-`skills/stitch-design/references/prompt-template.md`
+`references/prompt-template.md`
 - Specify platform (`DESKTOP` or `MOBILE`).
 - Include explicit hex codes with functional roles.
 - Structure top-to-bottom layout with real content.
@@ -140,7 +140,7 @@ Write high-fidelity prompts using the template at:
 ### Step 4 — Download Design Assets
 Call `get_screen` to obtain the HTML and screenshot URLs, then run:
 ```bash
-python skills/stitch-design/scripts/fetch_assets.py \
+python scripts/fetch_assets.py \
     --name <page-name> \
     --html "<html_url>" \
     --image "<image_url>" \
@@ -174,6 +174,6 @@ This saves:
 | **Claude Code** | Install this folder in `.claude/skills/stitch-design/` |
 | **Aider** | Load the relevant instructions with `aider --read` when needed |
 | **Claude Code** | Paste the rules section into `CLAUDE.md` |
-| **Plain script** | Run `stitch_client.py` directly from terminal |
+| **Plain script** | Run `scripts/stitch_client.py` from this folder |
 
 See [`SKILL_SPEC.md`](../../SKILL_SPEC.md) for the full adapter guide.

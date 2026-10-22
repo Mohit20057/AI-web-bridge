@@ -30,19 +30,29 @@ context, returned text, and round trips small; savings depend on the task.
   Prefer `--compare-provider` over loading all answers into CLI context.
 - Include only content appropriate to send to a web service. The bridge filters
   common secret-looking paths, but does not scan ordinary file contents.
-- Do not create or update durable project memory unless the user requests it.
+- The bridge keeps a compact, project-local handoff from submitted context
+  packets (task, project summary, and recent changes only). Use `--no-handoff`
+  for a request that should neither read nor save it; use the forget options to
+  clear saved data. Never place selected file contents or full chat transcripts
+  into the handoff.
 
 ## Workflow
 
 1. Resolve `BRIDGE_SCRIPT` to the repository's `bridge/argon_bridge.py`.
    Setup and browser-specific options are in the repository README.
+   After changing provider or browser profile, run `--doctor` once; don't repeat
+   it for every follow-up unless sign-in or browser state changed.
 2. For project work, prepare `_argon_context.json` with `version: 1`, a short
    `task`, and only necessary `project_summary`, `recent_changes`, `files`,
-   `errors`, `constraints`, or `requested_output` fields. Use selected snippets
-   or focused diffs; don't inspect more files just to fill the packet. For a
+   `errors`, `constraints`, or `requested_output` fields. The bridge carries
+   forward a missing project summary or recent-changes note from its compact
+   local handoff, including when switching providers. Use selected snippets or
+   focused diffs; don't inspect more files just to fill the packet. For a
    simple question, use `_argon_prompt.txt` or `--prompt`.
-3. If review is needed, run `python "$BRIDGE_SCRIPT" --context-file _argon_context.json --review-context`.
-   This prints the exact payload and does not contact a provider.
+3. Before sending sensitive context or when the user asks to review it, run
+   `python "$BRIDGE_SCRIPT" --context-file _argon_context.json --review-context`.
+   This prints the exact payload and does not contact a provider. Avoid reading
+   the full preview into the CLI's model context unless it is needed for review.
 4. Send one request and save the result:
 
    ```sh
@@ -60,8 +70,13 @@ context, returned text, and round trips small; savings depend on the task.
 
 For an explicitly requested multi-provider run, use
 `--providers gemini,chatgpt` or `--all`. The bridge saves one result per site
-and prints a status summary. Add `--compare-provider NAME` only when synthesis
-helps; its bounded comparison is saved separately.
+and prints a status summary. This is always opt-in because every selected site
+receives the same task context. Add `--compare-provider NAME` only when
+synthesis helps; its bounded comparison is saved separately.
+
+For browser-profile selection, readiness checks, local-data cleanup, and
+measured token comparisons, consult [advanced options](references/advanced-options.md)
+only when that feature is needed.
 
 ## Browser-only use
 

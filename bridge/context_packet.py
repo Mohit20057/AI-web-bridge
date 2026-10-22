@@ -48,7 +48,11 @@ def _is_sensitive_path(path: str) -> bool:
     return any(part in {".ssh", "secrets", "credentials", "private_keys"} for part in parts[:-1])
 
 
-def load_context_packet(path: Path, max_chars: int = DEFAULT_CONTEXT_LIMIT_CHARS) -> tuple[str, list[str]]:
+def load_context_packet(
+    path: Path,
+    max_chars: int = DEFAULT_CONTEXT_LIMIT_CHARS,
+    handoff: dict[str, Any] | None = None,
+) -> tuple[str, list[str]]:
     """Return a bounded Markdown context and non-secret filtering/truncation notes."""
     if max_chars < 1:
         raise ContextPacketError("Context character limit must be greater than zero.")
@@ -79,6 +83,17 @@ def load_context_packet(path: Path, max_chars: int = DEFAULT_CONTEXT_LIMIT_CHARS
         ):
             raise ContextPacketError(f"Context packet field '{field}' must be a list of strings.")
 
+    carried_fields = []
+    previous_task = None
+    if isinstance(handoff, dict):
+        saved_task = handoff.get("task")
+        if isinstance(saved_task, str) and saved_task.strip() != packet["task"].strip():
+            previous_task = saved_task.strip()
+        for field in ("project_summary", "recent_changes"):
+            if not packet.get(field) and isinstance(handoff.get(field), str) and handoff[field].strip():
+                packet[field] = handoff[field]
+                carried_fields.append(field)
+
     files = packet.get("files", [])
     if not isinstance(files, list):
         raise ContextPacketError("Context packet field 'files' must be a list.")
@@ -96,6 +111,8 @@ def load_context_packet(path: Path, max_chars: int = DEFAULT_CONTEXT_LIMIT_CHARS
         clean_files.append((file_path, item["content"]))
 
     sections = ["# Task context", "## Task", packet["task"].strip()]
+    if previous_task:
+        sections.extend(("## Previous task", previous_task))
     for field, title in (
         ("project_summary", "Project summary"),
         ("recent_changes", "Recent changes"),
@@ -119,6 +136,8 @@ def load_context_packet(path: Path, max_chars: int = DEFAULT_CONTEXT_LIMIT_CHARS
         )
 
     notes = []
+    if carried_fields:
+        notes.append("Carried forward saved project handoff: " + ", ".join(carried_fields) + ".")
     if excluded:
         notes.append(f"Excluded {excluded} file(s) with sensitive-looking paths.")
     files_heading = "\n\n## Relevant files\n\n"

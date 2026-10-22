@@ -33,15 +33,6 @@ prompt.txt
 argon_answer.md
 debug_gemini.png
 debug_*.png
-stitch_debug.png
-stitch_landing.png
-
-# ── Stitch design output (downloaded, not source) ──────────────
-design/stitch/*.html
-design/stitch/*.png
-design/stitch/*.jpg
-.stitch/
-
 # ── Python ─────────────────────────────────────────────────────
 __pycache__/
 *.py[oc]

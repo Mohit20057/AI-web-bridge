@@ -8,6 +8,7 @@ interaction lives behind adapters in bridge/providers/.
 import argparse
 import asyncio
 import importlib
+import json
 import os
 import socket
 import subprocess
@@ -26,9 +27,11 @@ if sys.platform == "win32":
 from playwright.async_api import async_playwright
 
 from config import ConfigurationError, browser_settings, load_config
+from browser_profiles import default_user_data_dir, list_browser_profiles, validate_profile_directory
 from context_packet import ContextPacketError, DEFAULT_CONTEXT_LIMIT_CHARS, load_context_packet
 from providers import BrowserUnavailableError, ProviderError
 from sessions import SessionStore
+from usage_metrics import record_usage_sample, summarize_usage
 
 
 WORKSPACE_DIR = Path(__file__).resolve().parent
@@ -85,18 +88,21 @@ def _session_profile_scope(provider_config: dict, settings: dict) -> str | None:
         os.path.expanduser(browser.get(profile_key, "~/ArgonChromeProfile"))
     ).resolve()
     profile = Path(settings["profile"]).expanduser().resolve()
-    if browser_name == "chrome" and profile == default_profile:
+    if browser_name == "chrome" and profile == default_profile and settings.get("profile_directory") in (None, "Default"):
         return None
-    return f"{browser_name}:{profile}"
+    directory = settings.get("profile_directory") or "Default"
+    return f"{browser_name}:{profile}:{directory}"
 
 
 def ensure_browser(settings: dict, start_url: str) -> subprocess.Popen | None:
     """Start a dedicated Chromium browser profile with CDP bound to localhost."""
     port = settings["port"]
+    profile_directory = settings.get("profile_directory")
+    print(f"Selected browser profile: {settings['name'].title()} / {settings['profile']} / {profile_directory or 'Default'}")
     if is_port_open(port, settings["host"]):
         print(
             f"Found an existing CDP endpoint at {settings['host']}:{port}. "
-            "The bridge cannot verify which profile started it; use the dedicated bridge launcher/profile."
+            "The bridge cannot verify which profile started it. Confirm it matches the selection shown above."
         )
         return None
 
@@ -112,6 +118,13 @@ def ensure_browser(settings: dict, start_url: str) -> subprocess.Popen | None:
             f"{settings['name'].title()} was not found. Set BROWSER_EXE to its executable path."
         )
 
+    if profile_directory:
+        selected_profile = settings["profile"] / profile_directory
+        if not selected_profile.is_dir():
+            raise BrowserUnavailableError(
+                f"Browser profile '{profile_directory}' was not found under {settings['profile']}. "
+                "Run --list-browser-profiles and use a listed directory name."
+            )
     settings["profile"].mkdir(parents=True, exist_ok=True)
     command = [
         browser_path,
@@ -123,6 +136,8 @@ def ensure_browser(settings: dict, start_url: str) -> subprocess.Popen | None:
         "--no-default-browser-check",
         start_url,
     ]
+    if profile_directory:
+        command.insert(-1, f"--profile-directory={profile_directory}")
     print(f"Launching {settings['name'].title()} with remote debugging on localhost:{port}…")
     try:
         proc = subprocess.Popen(
@@ -315,12 +330,45 @@ def _connection_settings_for(provider_config: dict, args) -> dict:
     settings = browser_settings(provider_config)
     if args.browser:
         settings["name"] = args.browser
-        if not args.profile_dir and not os.environ.get("BROWSER_PROFILE_DIR") and not os.environ.get("CHROME_PROFILE_DIR"):
-            browser_config = provider_config["browser"]
-            profile_key = "edge_default_profile" if args.browser == "edge" else "default_profile"
-            settings["profile"] = Path(
-                os.path.expanduser(browser_config.get(profile_key, "~/ArgonChromeProfile"))
-            ).resolve()
+        profile_env = provider_config["browser"].get(
+            "edge_profile_env" if args.browser == "edge" else "profile_env"
+        )
+        custom_root = args.profile_dir or os.environ.get("BROWSER_PROFILE_DIR") or (os.environ.get(profile_env) if profile_env else None)
+        if custom_root:
+            settings["profile"] = Path(custom_root).expanduser().resolve()
+        else:
+            if args.profile_directory or settings.get("profile_directory"):
+                settings["profile"] = default_user_data_dir(args.browser).resolve()
+            else:
+                browser_config = provider_config["browser"]
+                profile_key = "edge_default_profile" if args.browser == "edge" else "default_profile"
+                settings["profile"] = Path(
+                    os.path.expanduser(browser_config.get(profile_key, "~/ArgonChromeProfile"))
+                ).resolve()
+    if args.profile_directory:
+        try:
+            settings["profile_directory"] = validate_profile_directory(args.profile_directory)
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
+        profile_override_present = any(
+            os.environ.get(name)
+            for name in (
+                "BROWSER_PROFILE_DIR",
+                provider_config["browser"].get(
+                    "edge_profile_env" if settings["name"] == "edge" else "profile_env", ""
+                ),
+            )
+            if name
+        )
+        if not args.profile_dir and not profile_override_present:
+            settings["profile"] = default_user_data_dir(settings["name"]).resolve()
+        if not args.cdp_port:
+            try:
+                settings["port"] = int(os.environ.get("CDP_PORT", "9222"))
+            except ValueError as exc:
+                raise ConfigurationError("CDP_PORT must be an integer between 1 and 65535.") from exc
+            if not 1 <= settings["port"] <= 65535:
+                raise ConfigurationError("CDP_PORT must be an integer between 1 and 65535.")
     if args.cdp_host:
         settings["host"] = args.cdp_host
     if args.cdp_port:
@@ -477,7 +525,9 @@ async def run_doctor(provider_config: dict, provider_id: str, settings: dict) ->
     print(f"Provider: {provider_config['name']} ({provider_id})")
     print(f"Browser: {settings['name'].title()} / Chromium CDP")
     print(f"CDP endpoint: {host}:{port}")
-    print(f"Dedicated profile: {settings['profile']}")
+    print(f"Browser data folder: {settings['profile']}")
+    if settings.get("profile_directory"):
+        print(f"Selected profile: {settings['profile_directory']}")
 
     if not is_port_open(port, host):
         print("Status: browser endpoint is not reachable.")
@@ -507,14 +557,25 @@ async def run_doctor(provider_config: dict, provider_id: str, settings: dict) ->
             except Exception:
                 input_elem = None
             if input_elem:
-                print("Status: ready; provider chat input is visible and no prompt was sent.")
+                print("Status: signed in and ready; provider chat input is visible. No prompt was sent.")
+                provider = create_provider(provider_id, provider_config)
+                try:
+                    models = await provider.list_models(page)
+                finally:
+                    await provider.close()
+                if models:
+                    print("Models currently visible to this account:")
+                    for model_name in models:
+                        print(f"  - {model_name}")
+                else:
+                    print("Model choices were not detected; the site may not expose a picker on this page.")
                 return 0
-            if "accounts.google.com" in page.url:
+            if "accounts.google.com" in page.url or "/login" in page.url.casefold() or "/auth/" in page.url.casefold():
                 print("Status: provider requires sign-in.")
                 print("Next: finish signing in within the bridge browser, then run --doctor again.")
             else:
-                print("Status: provider page is open, but the expected chat input was not found.")
-                print("Next: confirm the page is loaded and signed in; the provider UI selectors may need updating.")
+                print("Status: not ready; sign-in may be required or the provider chat page did not finish loading.")
+                print("Next: confirm sign-in and page readiness. If the chat input remains missing, the provider UI selectors may need updating.")
             return 1
     except Exception as exc:
         print(f"Status: CDP endpoint responded, but Playwright could not inspect it: {exc}")
@@ -549,6 +610,22 @@ def main() -> None:
                         help="Print the exact assembled prompt and exit without opening a browser")
     parser.add_argument("--record-run", action="store_true",
                         help="Opt in to local metadata-only run logging under .ai-web-bridge/runs.jsonl")
+    parser.add_argument("--no-handoff", action="store_true",
+                        help="Do not load or save the compact project handoff for this request")
+    parser.add_argument("--forget-local-data", action="store_true",
+                        help="Remove saved chat links, run records, usage samples, and handoff for this project")
+    parser.add_argument("--forget-chats", action="store_true", help="Remove this project's saved browser chat links")
+    parser.add_argument("--forget-runs", action="store_true", help="Remove this project's optional run records")
+    parser.add_argument("--forget-handoff", action="store_true", help="Remove this project's compact saved handoff")
+    parser.add_argument("--forget-usage", action="store_true", help="Remove this project's token comparison samples")
+    parser.add_argument("--yes", action="store_true", help="Confirm a local-data removal action")
+    parser.add_argument("--record-usage-sample", action="store_true",
+                        help="Record token counts reported by a CLI; does not send a browser-AI request")
+    parser.add_argument("--usage-report", action="store_true", help="Summarize locally recorded token comparisons")
+    parser.add_argument("--usage-file", default=None, help="Usage sample file (default: project-local metadata folder)")
+    parser.add_argument("--usage-task", help="Short category label for a comparable task, not the prompt text")
+    for metric in ("baseline-input-tokens", "baseline-output-tokens", "bridge-input-tokens", "bridge-output-tokens"):
+        parser.add_argument(f"--{metric}", type=int, help=f"Token count reported by your coding CLI ({metric})")
     parser.add_argument("--diagnostics-dir", help="Opt in to saving page screenshots on query errors (may contain private chat data)")
     parser.add_argument("--model", "-m", default=None, help="Visible model label to select in the provider UI")
     parser.add_argument("--output", "--out", "-o", dest="output", help="File to save the response into")
@@ -557,11 +634,81 @@ def main() -> None:
     parser.add_argument("--list-models", action="store_true", help="List model choices visible in the provider UI")
     parser.add_argument("--launch-only", action="store_true", help="Open the configured browser and exit")
     parser.add_argument("--doctor", action="store_true", help="Check browser/provider setup without sending a prompt")
+    parser.add_argument("--list-browser-profiles", action="store_true",
+                        help="List named profiles available in the selected browser")
     parser.add_argument("--browser", choices=("chrome", "edge"), help="Browser to use (default: BROWSER or chrome)")
     parser.add_argument("--cdp-host", help="CDP host (defaults to localhost)")
     parser.add_argument("--cdp-port", type=int, help="CDP port (default: CDP_PORT, CHROME_DEBUG_PORT, or 9222)")
     parser.add_argument("--profile-dir", help="Dedicated browser profile directory")
+    parser.add_argument("--profile-directory", help="Named browser profile folder, such as Default or Profile 1")
     args = parser.parse_args()
+
+    local_store = SessionStore()
+    usage_path = Path(args.usage_file).expanduser().resolve() if args.usage_file else local_store.project_dir / ".ai-web-bridge" / "usage.jsonl"
+    usage_counts = {
+        "baseline_input_tokens": args.baseline_input_tokens,
+        "baseline_output_tokens": args.baseline_output_tokens,
+        "bridge_input_tokens": args.bridge_input_tokens,
+        "bridge_output_tokens": args.bridge_output_tokens,
+    }
+    supplied_metrics = any(value is not None for value in usage_counts.values())
+    if args.record_usage_sample:
+        if not args.usage_task or any(value is None for value in usage_counts.values()):
+            parser.error("--record-usage-sample requires --usage-task and all four token-count options.")
+        try:
+            sample = record_usage_sample(usage_path, args.usage_task, usage_counts)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            f"Recorded {sample['task_label']}: baseline {sample['baseline_total_tokens']:,}, "
+            f"bridge workflow {sample['bridge_total_tokens']:,}, change {sample['tokens_saved']:+,} tokens "
+            f"({sample['reduction_percent']:+.2f}%)."
+        )
+        print("These are user-supplied CLI metrics, not a guaranteed savings estimate.")
+        return
+    if supplied_metrics or args.usage_task:
+        parser.error("Token counts and --usage-task require --record-usage-sample.")
+    if args.usage_report:
+        try:
+            summaries = summarize_usage(usage_path)
+        except FileNotFoundError:
+            parser.error(f"No usage samples found at {usage_path}.")
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not summaries:
+            print("No usage samples have been recorded.")
+        for item in summaries:
+            print(
+                f"{item['task_label']} ({item['samples']} sample(s)): "
+                f"baseline {item['baseline_total_tokens']:,}, bridge workflow {item['bridge_total_tokens']:,}, "
+                f"change {item['tokens_saved']:+,} ({item['reduction_percent']:+.2f}%)."
+            )
+        print("Results compare only the CLI token counts you recorded; they are task-specific.")
+        return
+
+    forget_categories = set()
+    if args.forget_local_data:
+        forget_categories = {"chats", "runs", "handoff", "usage"}
+    else:
+        if args.forget_chats:
+            forget_categories.add("chats")
+        if args.forget_runs:
+            forget_categories.add("runs")
+        if args.forget_handoff:
+            forget_categories.add("handoff")
+        if args.forget_usage:
+            forget_categories.add("usage")
+    if forget_categories:
+        labels = ", ".join(sorted(forget_categories))
+        if not args.yes:
+            if not sys.stdin.isatty():
+                parser.error(f"Removing local {labels} requires --yes when input is not interactive.")
+            if input(f"Remove this project's saved {labels}? [y/N] ").strip().casefold() not in {"y", "yes"}:
+                print("No local data was removed.")
+                return
+        removed = local_store.clear_local_data(forget_categories)
+        print("Removed " + (", ".join(str(path) for path in removed) if removed else "no matching saved files"))
+        return
 
     try:
         if args.list_providers:
@@ -578,8 +725,8 @@ def main() -> None:
             parser.error("Use --providers or --all instead of --provider for a multi-provider run.")
         if args.compare_provider and not multi_mode:
             parser.error("--compare-provider requires --providers or --all.")
-        if multi_mode and (args.list_models or args.launch_only or args.doctor):
-            parser.error("Multi-provider mode cannot be combined with --list-models, --launch-only, or --doctor.")
+        if multi_mode and (args.list_models or args.launch_only or args.doctor or args.list_browser_profiles):
+            parser.error("Multi-provider mode cannot be combined with --list-models, --launch-only, --doctor, or --list-browser-profiles.")
         if args.providers:
             provider_ids = [provider.strip() for provider in args.providers.split(",")]
             if any(not provider for provider in provider_ids):
@@ -608,6 +755,24 @@ def main() -> None:
         selected_provider = provider_ids[0]
         provider_config = config["providers"][selected_provider]
         browser_settings_value = _connection_settings_for(provider_config, args)
+        if args.list_browser_profiles:
+            configured_root = (
+                args.profile_dir
+                or os.environ.get("BROWSER_PROFILE_DIR")
+                or os.environ.get(provider_config["browser"].get(
+                    "edge_profile_env" if browser_settings_value["name"] == "edge" else "profile_env", ""
+                ))
+            )
+            profile_root = Path(configured_root).expanduser().resolve() if configured_root else default_user_data_dir(browser_settings_value["name"])
+            profiles = list_browser_profiles(profile_root)
+            print(f"Browser: {browser_settings_value['name'].title()}\nProfile folder: {profile_root}")
+            if profiles:
+                print("Available profiles (use the directory value with --profile-directory):")
+                for item in profiles:
+                    print(f"  {item['directory']}\t{item['name']}")
+            else:
+                print("No named profiles were found. Check the selected browser's user-data folder or use --profile-dir.")
+            return
         if args.launch_only:
             ensure_browser(browser_settings_value, provider_config["url"])
             return
@@ -660,7 +825,8 @@ def main() -> None:
             packet_budget = args.context_limit_chars - len(extra)
             if packet_budget < 1:
                 raise ContextPacketError("The additional request alone exceeds the configured context limit.")
-            context, notes = load_context_packet(context_path, packet_budget)
+            saved_handoff = {} if args.no_handoff else local_store.load_handoff()
+            context, notes = load_context_packet(context_path, packet_budget, handoff=saved_handoff)
             for note in notes:
                 print(f"Context note: {note}", file=sys.stderr)
             prompt = context + extra
@@ -689,6 +855,10 @@ def main() -> None:
         if args.review_context:
             print(prompt)
             return
+
+        if args.context_file and not args.no_handoff:
+            packet_data = json.loads(Path(args.context_file).expanduser().resolve().read_text(encoding="utf-8"))
+            local_store.save_handoff(packet_data)
 
         if multi_mode:
             exit_code = asyncio.run(

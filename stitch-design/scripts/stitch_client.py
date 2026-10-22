@@ -4,7 +4,7 @@ Direct Google Stitch Client via remote MCP API.
 Allows listing projects, creating projects, generating screens, and fetching assets.
 
 Setup:
-  Set the STITCH_API_KEY environment variable (or put it in a .env file).
+  Set the STITCH_API_KEY environment variable (or put it in stitch-design/.env).
   You can get a Stitch API key from https://aistudio.google.com/apikey
 """
 
@@ -18,11 +18,9 @@ import urllib.request
 from pathlib import Path
 
 # ── API key resolution ────────────────────────────────────────────────────────
-# Priority: CLI --api-key flag > STITCH_API_KEY env var > .env file in CWD
+# Priority: CLI --api-key flag > STITCH_API_KEY env var > stitch-design/.env
 def _load_dotenv():
-    env_file = Path(".env")
-    if not env_file.exists():
-        env_file = Path(__file__).parent.parent.parent / ".env"
+    env_file = Path(__file__).resolve().parents[1] / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
@@ -44,7 +42,7 @@ def _get_key(api_key=None):
             "  Set the STITCH_API_KEY environment variable:\n"
             "    Windows:  set STITCH_API_KEY=your_key_here\n"
             "    Mac/Linux: export STITCH_API_KEY=your_key_here\n"
-            "  Or put it in a .env file:\n"
+            "  Or put it in stitch-design/.env:\n"
             "    STITCH_API_KEY=your_key_here\n"
             "\n  Get a key at: https://aistudio.google.com/apikey\n"
         )
@@ -57,7 +55,7 @@ def call_stitch_mcp(method_name: str, params: dict, api_key: str = None) -> dict
         "X-Goog-Api-Key": key,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "User-Agent": "ai-web-bridge/stitch-client",
+        "User-Agent": "stitch-design/stitch-client",
     }
     payload = {
         "jsonrpc": "2.0",

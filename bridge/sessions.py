@@ -22,6 +22,8 @@ class SessionStore:
         )
         self.path = self.project_dir / ".ai-web-bridge" / "sessions.json"
         self.runs_path = self.project_dir / ".ai-web-bridge" / "runs.jsonl"
+        self.handoff_path = self.project_dir / ".ai-web-bridge" / "handoff.json"
+        self.usage_path = self.project_dir / ".ai-web-bridge" / "usage.jsonl"
 
     def append_run(self, record: dict) -> None:
         """Append opt-in run metadata; callers must never pass prompt contents."""
@@ -47,6 +49,61 @@ class SessionStore:
             return None
         value = record.get("last_chat_url")
         return value if isinstance(value, str) and value else None
+
+    def load_handoff(self) -> dict:
+        try:
+            data = json.loads(self.handoff_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return {}
+        return {
+            field: value.strip()[:2000]
+            for field in ("task", "project_summary", "recent_changes")
+            if isinstance((value := data.get(field)), str) and value.strip()
+        }
+
+    def save_handoff(self, packet: dict) -> None:
+        """Store only compact task notes; never persist selected file contents."""
+        safe = {"version": 1, "updated_at": datetime.now(timezone.utc).isoformat()}
+        for field in ("task", "project_summary", "recent_changes"):
+            value = packet.get(field)
+            if isinstance(value, str) and value.strip():
+                safe[field] = value.strip()[:2000]
+        self._write_json_atomic(self.handoff_path, safe)
+
+    def clear_local_data(self, categories: set[str]) -> list[Path]:
+        """Remove only explicitly selected files in this project's metadata folder."""
+        paths = {
+            "chats": self.path,
+            "runs": self.runs_path,
+            "handoff": self.handoff_path,
+            "usage": self.usage_path,
+        }
+        removed = []
+        for category in categories:
+            if category not in paths:
+                continue
+            path = paths[category]
+            try:
+                path.unlink()
+                removed.append(path)
+            except FileNotFoundError:
+                pass
+        return removed
+
+    @staticmethod
+    def _write_json_atomic(path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix="bridge-data-", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+            os.replace(temp_name, path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
 
     def save_chat_url(self, provider: str, url: str) -> None:
         # Keep only the origin and path. Query strings and fragments may contain

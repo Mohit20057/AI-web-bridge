@@ -21,7 +21,8 @@ and check changes.
 
 ## How it works
 
-1. Choose a task and the browser-based AI service you want to use.
+1. Choose Chrome or Microsoft Edge, the browser profile, and the AI service you
+   want to use.
 2. Provide a concise description and select only the project details that are
    relevant.
 3. Review what will be shared, then send it to the selected service.
@@ -31,15 +32,18 @@ and check changes.
 Gemini, ChatGPT, and Claude are the currently configured services. The models
 and features available depend on what each service shows for your account.
 Chrome and Microsoft Edge are supported. Your browser account must be signed in
-to the service you want to use.
+to the service you want to use. Before connecting, the bridge shows which
+browser profile it selected.
 
 ## What is saved
 
 AI Web Bridge keeps a small amount of information on your computer to help
 continue work. This can include the project and service association, a link to
-the related conversation, and optional run details such as the service, model
-label, time, and references to local files. Optional run details do not include
-the prompt, project context, or AI response.
+the related conversation, and a compact handoff with the task and recent project
+changes. It does not save selected file contents or the full AI conversation.
+Optional run details such as service, model label, time, and file references do
+not include the prompt, project context, or AI response. You can clear saved
+conversation links, handoff notes, and run records for a project.
 
 It does not save or copy your browser password, login credentials, or browser
 cookies. Your browser continues to manage its own signed-in session. Responses
@@ -56,7 +60,8 @@ and privacy terms.
 Review the information before sending it. Include only details you want the
 chosen service to receive. The project can filter some sensitive-looking file
 names, but it cannot guarantee that every secret inside selected text will be
-found.
+found. You can inspect the complete assembled request before sending it. Sending
+to multiple services is optional and requires choosing those services.
 
 ## Continuing work and choosing a model
 
@@ -68,12 +73,13 @@ the task and changes so far.
 
 You can use model choices that are available in the selected service for your
 account. Model names and availability can change, and some choices may depend
-on the service's plan or settings.
+on the service's plan or settings. The readiness check reports whether the
+service is signed in and which model choices are currently visible.
 
-## Other included tool
-
-The project also includes an optional Google Stitch feature for generating UI
-designs. It uses the Stitch service under the user's own account and settings.
+An optional usage report can compare token counts reported by your coding
+assistant for similar tasks. It stores the task category and counts only, not
+the task text or AI responses. Results vary by task and are not a guarantee of
+savings.
 
 ## Important limits
 

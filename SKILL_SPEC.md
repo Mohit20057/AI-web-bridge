@@ -67,7 +67,7 @@ Brief description of what this skill does.
 **Key conventions:**
 - **CRITICAL RULES** are always read and applied before anything else.
 - Steps are numbered and self-contained.
-- Script paths use environment variables (`$BRIDGE_SCRIPT`, `$STITCH_CLIENT`)
+- Script paths use environment variables (`$BRIDGE_SCRIPT`)
   rather than hardcoded paths, so the skill works wherever you clone the repo.
 - Temp files (`_*_prompt.txt`, `_*_response.md`) are cleaned up only when the
   full task is done, never between steps of a multi-turn task.
@@ -80,6 +80,16 @@ The stable bridge entry point is `python bridge/argon_bridge.py`. Its arguments
 are CLI-neutral; each coding tool only needs a way to load the skill and run a
 shell command. `BRIDGE_SCRIPT` may point to an absolute path when the project
 root is not the current directory.
+
+The browser can be selected with `--browser chrome|edge`. Use
+`--list-browser-profiles` to find a profile directory ID and
+`--profile-directory ID` to select it; add `--profile-dir ROOT` for a
+nonstandard browser data folder. Selecting an everyday profile may require
+closing its browser first so the bridge can launch it with debugging enabled;
+the bridge does not close an already-open browser. `--doctor` checks sign-in
+readiness and lists model choices without sending a prompt. `--review-context` prints the exact
+assembled request without contacting a provider. Multi-provider mode is always
+explicit and sends the same request to every selected service.
 
 ### Gemini CLI
 
@@ -177,6 +187,16 @@ history unless the user manually provides that information.
 The packet schema and review/logging behavior are documented in
 [CONTEXT_PACKET.md](CONTEXT_PACKET.md). Multi-provider mode remains opt-in:
 each site receives the same context and total provider usage increases.
+
+The optional project handoff saves only a task summary, project summary, and
+recent changes from submitted context packets. `--no-handoff` disables it for a
+request. The `--forget-*` options remove chosen project-local records. Optional
+token comparisons accept counts reported by the coding CLI; they do not
+estimate savings automatically.
+
+Google Stitch is isolated as a companion folder under
+[stitch-design/](stitch-design/) because it uses Google's Stitch MCP service
+and separate credentials rather than a signed-in browser-AI session.
 
 ---
 

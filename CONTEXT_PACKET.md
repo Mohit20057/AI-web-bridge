@@ -48,5 +48,21 @@ prompt text, packet contents, or response text. The directory is gitignored.
 In multi-provider mode, each successful provider submission produces its own
 metadata record; an optional comparison submission is recorded separately.
 
-This packet is a handoff for one request, not automatically maintained project
-memory. Update durable project notes only when the user asks for that.
+When a context packet is submitted, the bridge saves only its task, project
+summary, and recent-changes notes in a project-local handoff. A later packet
+can carry forward a missing summary or recent-changes note, including when
+switching providers. It never saves file excerpts from the packet in the
+handoff. Use `--no-handoff` to disable loading and saving for one request, or
+`--forget-handoff` to remove the saved notes. `--forget-chats`, `--forget-runs`,
+and `--forget-usage` remove those project-local records; `--forget-local-data`
+removes all four categories. Interactive removal asks for confirmation; use
+`--yes` for an intentional non-interactive cleanup.
+
+## Optional token comparison
+
+If your coding assistant reports token counts, you can record comparable
+before-and-after counts with `--record-usage-sample`, a short task category, and
+the baseline/bridge input and output totals. `--usage-report` groups those
+samples by category and reports the measured difference. The bridge does not
+estimate or retrieve token counts from the coding assistant, and usage records
+do not include prompts or responses.
