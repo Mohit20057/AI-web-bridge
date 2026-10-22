@@ -33,7 +33,11 @@ Gemini, ChatGPT, and Claude are the currently configured services. The models
 and features available depend on what each service shows for your account.
 Chrome and Microsoft Edge are supported. Your browser account must be signed in
 to the service you want to use. Before connecting, the bridge shows which
-browser profile it selected.
+browser profile it selected. Chrome users can also choose to connect to an
+already-open, signed-in Chrome session after enabling Remote Debugging and
+approving the connection in Chrome. This gives the bridge access to that
+browser session while it is connected; use it only when you trust the local
+bridge.
 
 ## What is saved
 

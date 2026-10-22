@@ -45,7 +45,11 @@ context, returned text, and round trips small; savings depend on the task.
 1. Resolve `BRIDGE_SCRIPT` to the repository's `bridge/argon_bridge.py`.
    Setup and browser-specific options are in the repository README.
    After changing provider or browser profile, run `--doctor` once; don't repeat
-   it for every follow-up unless sign-in or browser state changed.
+   it for every follow-up unless sign-in or browser state changed. Use the
+   managed browser by default. If the user asks to use their already-open,
+   signed-in Chrome session, pass `--browser chrome --browser-mode existing`;
+   this requires Chrome 144+, Node.js/npm, Remote Debugging enabled, and the
+   user's approval in Chrome. See [advanced options](references/advanced-options.md).
 2. For project work, prepare `_argon_context.json` with `version: 1`, a short
    `task`, and only necessary `project_summary`, `recent_changes`, `files`,
    `errors`, `constraints`, or `requested_output` fields. The bridge carries

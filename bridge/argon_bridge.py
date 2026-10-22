@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from playwright.async_api import async_playwright
 
 from config import ConfigurationError, browser_settings, load_config
 from browser_profiles import default_user_data_dir, list_browser_profiles, validate_profile_directory
+from chrome_existing_session import ChromeDevToolsSession, ChromeMcpContext
 from context_packet import ContextPacketError, DEFAULT_CONTEXT_LIMIT_CHARS, load_context_packet
 from providers import BrowserUnavailableError, ProviderError
 from sessions import SessionStore
@@ -81,6 +83,8 @@ def find_browser(browser_name: str, explicit_path: str | None = None) -> str | N
 
 def _session_profile_scope(provider_config: dict, settings: dict) -> str | None:
     """Keep legacy Chrome-default chat links while isolating other browser profiles."""
+    if settings.get("mode") == "existing":
+        return "chrome:existing-session"
     browser_name = settings["name"]
     browser = provider_config["browser"]
     profile_key = "edge_default_profile" if browser_name == "edge" else "default_profile"
@@ -98,6 +102,8 @@ def _session_profile_scope(provider_config: dict, settings: dict) -> str | None:
 
 def ensure_browser(settings: dict, start_url: str) -> subprocess.Popen | None:
     """Start a dedicated Chromium browser profile with CDP bound to localhost."""
+    if settings.get("mode", "managed") == "existing":
+        return None
     port = settings["port"]
     profile_directory = settings.get("profile_directory")
     print(f"Selected browser profile: {settings['name'].title()} / {settings['profile']} / {profile_directory or 'Default'}")
@@ -162,6 +168,39 @@ def ensure_browser(settings: dict, start_url: str) -> subprocess.Popen | None:
     )
 
 
+@asynccontextmanager
+async def connected_browser_context(settings: dict, start_url: str, browser_session=None):
+    """Yield either a user-approved live Chrome session or the managed CDP context."""
+    if settings.get("mode", "managed") == "existing":
+        owns_session = browser_session is None
+        session = browser_session or await ChromeDevToolsSession().start()
+        try:
+            yield await ChromeMcpContext(session, start_url).initialize_pages()
+        finally:
+            if owns_session:
+                await session.close()
+        return
+
+    ensure_browser(settings, start_url)
+    async with async_playwright() as playwright:
+        try:
+            browser = await playwright.chromium.connect_over_cdp(
+                f"http://{settings['host']}:{settings['port']}"
+            )
+        except Exception as exc:
+            raise BrowserUnavailableError(
+                f"Cannot connect to the configured Chromium browser on {settings['host']}:{settings['port']}. "
+                "Start the bridge browser, sign in, and retry."
+            ) from exc
+        contexts = browser.contexts
+        context = contexts[0] if contexts else await browser.new_context()
+        try:
+            await context.grant_permissions(["clipboard-read", "clipboard-write"])
+        except Exception:
+            pass
+        yield context
+
+
 def create_provider(provider_id: str, config: dict):
     """Resolve a configured provider ID to its adapter implementation."""
     module_name, class_name = config["adapter"].split(":", 1)
@@ -189,33 +228,16 @@ async def execute_query(
     context_ref: str | None = None,
     return_details: bool = False,
     diagnostics_dir: str | None = None,
+    browser_session: ChromeDevToolsSession | None = None,
 ) -> str | list[str] | QueryResult:
     provider = create_provider(provider_id, provider_config)
     browser_settings_value = connection_settings or browser_settings(provider_config)
     port = browser_settings_value["port"]
-    ensure_browser(browser_settings_value, provider.url)
     sessions = SessionStore(
         profile_scope=_session_profile_scope(provider_config, browser_settings_value)
     )
 
-    async with async_playwright() as playwright:
-        try:
-            browser = await playwright.chromium.connect_over_cdp(
-                f"http://{browser_settings_value['host']}:{port}"
-            )
-        except Exception as exc:
-            raise BrowserUnavailableError(
-                f"Cannot connect to the configured Chromium browser on {browser_settings_value['host']}:{port}. "
-                "Start the bridge browser, sign in, and retry."
-            ) from exc
-
-        contexts = browser.contexts
-        context = contexts[0] if contexts else await browser.new_context()
-        try:
-            await context.grant_permissions(["clipboard-read", "clipboard-write"])
-        except Exception:
-            pass
-
+    async with connected_browser_context(browser_settings_value, provider.url, browser_session) as context:
         try:
             chat_url = None if new_chat else sessions.get_chat_url(provider_id)
             page = await provider.open_or_resume_chat(context, chat_url=chat_url, new_chat=new_chat)
@@ -251,6 +273,9 @@ async def execute_query(
                     pass
                 raise
 
+            refresh_url = getattr(page, "refresh_url", None)
+            if refresh_url:
+                await refresh_url()
             sessions.save_chat_url(provider_id, page.url)
             if record_run:
                 sessions.append_run({
@@ -385,6 +410,10 @@ def _connection_settings_for(provider_config: dict, args) -> dict:
             if not 1 <= shared_port <= 65535:
                 raise ConfigurationError("CDP_PORT must be an integer between 1 and 65535.")
             settings["port"] = shared_port
+    if args.browser_mode:
+        settings["mode"] = args.browser_mode
+    if settings.get("mode") == "existing" and settings["name"] != "chrome":
+        raise ConfigurationError("Existing-session mode currently supports Chrome only; select --browser chrome.")
     return settings
 
 
@@ -400,6 +429,8 @@ async def execute_multi_query(
     results: list[dict] = []
     timeout = args.timeout or 300
     interrupted = False
+    first_settings = _connection_settings_for(config["providers"][provider_ids[0]], args)
+    browser_session = await ChromeDevToolsSession().start() if first_settings.get("mode") == "existing" else None
     for provider_id in provider_ids:
         provider_config = config["providers"][provider_id]
         output_path = _multi_output_path(args.output, provider_id)
@@ -419,6 +450,7 @@ async def execute_multi_query(
                 context_ref=context_ref,
                 return_details=True,
                 diagnostics_dir=args.diagnostics_dir,
+                browser_session=browser_session,
             )
             if not isinstance(query_result, QueryResult):
                 raise ProviderError(f"Provider '{provider_id}' did not return a response result.")
@@ -482,6 +514,7 @@ async def execute_multi_query(
                     context_ref=context_ref,
                     return_details=True,
                     diagnostics_dir=args.diagnostics_dir,
+                    browser_session=browser_session,
                 )
                 if not isinstance(comparison_result_details, QueryResult):
                     raise ProviderError("Comparison provider did not return a response result.")
@@ -510,6 +543,9 @@ async def execute_multi_query(
                     "output": str(compare_path),
                 }
 
+    if browser_session:
+        await browser_session.close()
+
     print("\nMulti-provider run summary:")
     for result in results + ([comparison_result] if comparison_result else []):
         model_label = f"; model={result['model']}" if result.get("model") else ""
@@ -523,6 +559,48 @@ async def execute_multi_query(
 
 async def run_doctor(provider_config: dict, provider_id: str, settings: dict) -> int:
     """Inspect configuration and current browser readiness without sending a prompt."""
+    if settings.get("mode") == "existing":
+        print(f"Provider: {provider_config['name']} ({provider_id})")
+        print("Browser: Chrome / existing signed-in session")
+        try:
+            session = await ChromeDevToolsSession().start()
+            try:
+                context = await ChromeMcpContext(session, provider_config["url"]).initialize_pages()
+                provider_host = provider_config["url"].split("/")[2]
+                page = next((item for item in context.pages if provider_host in item.url), None)
+                if not page:
+                    print(f"Status: Chrome is connected, but {provider_config['name']} is not open.")
+                    print(f"Next: open {provider_config['url']} in your Chrome profile and rerun --doctor.")
+                    return 1
+                try:
+                    input_element = await page.wait_for_selector(
+                        provider_config["selectors"]["input"], timeout=5000, state="visible"
+                    )
+                except Exception:
+                    input_element = None
+                if not input_element:
+                    print("Status: Chrome is connected, but the provider chat input is not ready or sign-in is required.")
+                    return 1
+                print("Status: signed in and ready; provider chat input is visible. No prompt was sent.")
+                provider = create_provider(provider_id, provider_config)
+                try:
+                    models = await provider.list_models(page)
+                finally:
+                    await provider.close()
+                if models:
+                    print("Models currently visible to this account:")
+                    for model_name in models:
+                        print(f"  - {model_name}")
+                else:
+                    print("Model choices were not detected; the site may not expose a picker on this page.")
+                return 0
+            finally:
+                await session.close()
+        except Exception as exc:
+            print(f"Status: Could not connect to the existing Chrome session: {exc}")
+            print("Next: use Chrome 144+, enable Remote Debugging at chrome://inspect/#remote-debugging, and approve the bridge.")
+            return 1
+
     host, port = settings["host"], settings["port"]
     print(f"Provider: {provider_config['name']} ({provider_id})")
     print(f"Browser: {settings['name'].title()} / Chromium CDP")
@@ -639,6 +717,8 @@ def main() -> None:
     parser.add_argument("--list-browser-profiles", action="store_true",
                         help="List named profiles available in the selected browser")
     parser.add_argument("--browser", choices=("chrome", "edge"), help="Browser to use (default: BROWSER or chrome)")
+    parser.add_argument("--browser-mode", choices=("managed", "existing"),
+                        help="Use a bridge-managed profile or Chrome's approved existing session (Chrome 144+)")
     parser.add_argument("--cdp-host", help="CDP host (defaults to localhost)")
     parser.add_argument("--cdp-port", type=int, help="CDP port (default: CDP_PORT, CHROME_DEBUG_PORT, or 9222)")
     parser.add_argument("--profile-dir", help="Dedicated browser profile directory")
@@ -776,7 +856,13 @@ def main() -> None:
                 print("No named profiles were found. Check the selected browser's user-data folder or use --profile-dir.")
             return
         if args.launch_only:
-            ensure_browser(browser_settings_value, provider_config["url"])
+            if browser_settings_value.get("mode") == "existing":
+                async def connect_existing_chrome():
+                    session = await ChromeDevToolsSession().start()
+                    await session.close()
+                asyncio.run(connect_existing_chrome())
+            else:
+                ensure_browser(browser_settings_value, provider_config["url"])
             return
 
         if args.doctor:

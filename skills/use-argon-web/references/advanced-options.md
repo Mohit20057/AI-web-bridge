@@ -11,8 +11,24 @@ Read only the section needed for the current request.
 - Select an ID with `--profile-directory ID`; use `--profile-dir ROOT` for a
   nonstandard browser data folder.
 - The bridge prints the selected browser and profile before connecting. An
-  everyday profile may need its browser closed first so the bridge can launch
-  it with debugging enabled; the bridge never closes an already-open browser.
+  everyday profile in managed mode may need its browser closed first so the
+  bridge can launch it with debugging enabled; the bridge never closes an
+  already-open browser.
+- The safer default is the bridge-managed profile. To attach to an existing,
+  signed-in Chrome session, use Chrome 144 or newer and install Node.js LTS/npm.
+  In Chrome, open `chrome://inspect/#remote-debugging` and enable Remote
+  Debugging. Then pass `--browser chrome --browser-mode existing` on the bridge
+  command. Chrome will ask you to approve access; review the dialog and click
+  Allow. This mode is currently Chrome-only. While connected, the bridge can
+  access the active Chrome session and its signed-in sites. The bridge disables
+  Chrome DevTools MCP usage statistics and performance URL reporting.
+
+  ```sh
+  python "$BRIDGE_SCRIPT" --browser chrome --browser-mode existing --doctor
+  python "$BRIDGE_SCRIPT" --browser chrome --browser-mode existing --context-file _argon_context.json --out _argon_response.md
+  ```
+
+  To keep using an isolated bridge profile, use the default `managed` mode.
 
 ## Readiness and review
 

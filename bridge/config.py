@@ -97,8 +97,16 @@ def browser_settings(provider: dict[str, Any]) -> dict[str, Any]:
         profile_default = str(default_user_data_dir(browser_name))
     profile = Path(profile_override or profile_default).expanduser().resolve()
     executable = os.environ.get("BROWSER_EXE")
+    connection_mode = os.environ.get("BROWSER_MODE", "managed").strip().lower()
+    if connection_mode not in {"managed", "existing"}:
+        raise ConfigurationError("BROWSER_MODE must be 'managed' or 'existing'.")
+    if connection_mode == "existing" and browser_name != "chrome":
+        raise ConfigurationError(
+            "BROWSER_MODE=existing currently supports Chrome only. Use --browser chrome or managed mode."
+        )
     return {
         "name": browser_name,
+        "mode": connection_mode,
         "host": host,
         "port": port,
         "profile": profile,
