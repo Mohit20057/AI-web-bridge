@@ -4,6 +4,8 @@ Read only the section needed for the current request.
 
 ## Browser and profile
 
+- The skill asks which browser to use only once per chat if the user has not
+  already chosen one. It reuses that choice for later requests in the chat.
 - Choose Chrome or Edge with `--browser chrome|edge`.
 - Use `--list-browser-profiles` to see profile display names and directory IDs.
 - Select an ID with `--profile-directory ID`; use `--profile-dir ROOT` for a

@@ -18,6 +18,10 @@ context, returned text, and round trips small; savings depend on the task.
 
 ## Rules
 
+- Choose the browser once per chat. Reuse a browser the user named earlier in
+  this conversation. If they have not chosen one, ask once which to use (Chrome
+  or Edge), remember it for this chat, and pass it with `--browser` on each
+  bridge call. Ask again only if the user requests a change.
 - Use one provider by default. Preserve that provider's chat for follow-ups. A
   different provider cannot see the old provider's history, so give it a small
   handoff packet.

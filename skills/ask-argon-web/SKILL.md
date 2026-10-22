@@ -15,6 +15,10 @@ metadata:
 Use the canonical [`use-argon-web`](../use-argon-web/SKILL.md) skill when it is
 available. Otherwise follow this short path:
 
+Reuse the browser chosen earlier in this chat. If none was chosen, ask once
+whether to use Chrome or Edge and keep that choice for later requests in this
+chat. Ask again only if the user requests a change.
+
 1. Build a compact request with only task-relevant excerpts; never send the
    transcript, repository, or unchanged files.
 2. Run `python bridge/argon_bridge.py --context-file _argon_context.json --out _argon_response.md`
