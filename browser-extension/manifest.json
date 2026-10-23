@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "AI Web Bridge",
+  "version": "0.2.0",
+  "description": "Run AI Web Bridge requests automatically in your browser tabs for Gemini, ChatGPT, Claude, Grok, Blackbox, and more.",
+  "permissions": [
+    "tabs",
+    "windows",
+    "scripting",
+    "storage",
+    "nativeMessaging",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "AI Web Bridge (Auto)",
+    "default_popup": "popup.html"
+  }
+}

@@ -88,8 +88,9 @@ nonstandard browser data folder. Selecting an everyday profile may require
 closing its browser first so the bridge can launch it with debugging enabled;
 the bridge does not close an already-open browser. `--doctor` checks sign-in
 readiness and lists model choices without sending a prompt. `--review-context` prints the exact
-assembled request without contacting a provider. Multi-provider mode is always
-explicit and sends the same request to every selected service.
+assembled request without contacting a provider. Multi-provider use is explicit:
+`--providers` and `--all` send the same request to each selected service, while
+`--tasks-file` routes a distinct task to each named service.
 
 ### Gemini CLI
 
@@ -172,9 +173,11 @@ output can use the same contract:
 python bridge/argon_bridge.py --context-file _argon_context.json --out _argon_response.md
 ```
 
-Use `--prompt-file` for a simple question. For an explicitly requested fan-out,
-use `--providers gemini,chatgpt` or `--all`; keep the default single-provider
-path to limit usage.
+Use `--prompt-file` for a simple question. For an explicitly requested
+comparison, use `--providers gemini,chatgpt` or `--all`. To assign different
+work, pass a version 1 JSON file with a `tasks` object to `--tasks-file`.
+Providers run sequentially, with separate output files. Keep the default
+single-provider path to limit usage.
 
 ### Browser-only user
 
@@ -186,7 +189,8 @@ history unless the user manually provides that information.
 
 The packet schema and review/logging behavior are documented in
 [CONTEXT_PACKET.md](CONTEXT_PACKET.md). Multi-provider mode remains opt-in:
-each site receives the same context and total provider usage increases.
+comparison sends the same context to each site; task routing sends shared
+context plus a provider-specific assignment. Total provider usage increases.
 
 The optional project handoff saves only a task summary, project summary, and
 recent changes from submitted context packets. `--no-handoff` disables it for a
@@ -220,9 +224,10 @@ provider's current signed-in UI. Select a configured provider with
 `--provider NAME`; use `--list-providers` to list adapters and
 `--provider NAME --list-models` to inspect model labels shown to that account.
 `--model LABEL` must match one visible option and the selected label must be
-confirmed before the prompt is submitted. For fan-out, `--providers` and `--all`
-run sequentially and save distinct outputs; the same context is sent to each
-selected provider. See [multi-provider usage](README.md#multi-provider-runs).
+confirmed before the prompt is submitted. For comparison, `--providers` and
+`--all` run sequentially and save distinct outputs; each gets the same context.
+For routed assignments, `--tasks-file` gives each provider its own task plus
+shared context. See [multi-provider usage](README.md#multi-provider-runs).
 
 ---
 

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Web Bridge</title>
+    <style>
+      body { width: 320px; margin: 0; padding: 16px; color: #17202a; font: 14px/1.45 system-ui, sans-serif; }
+      h1 { margin: 0 0 10px; font-size: 17px; display: flex; align-items: center; justify-content: space-between; }
+      .badge { font-size: 11px; font-weight: normal; background: #e0f2fe; color: #0369a1; padding: 2px 7px; border-radius: 12px; }
+      p { margin: 8px 0; }
+      input, button { box-sizing: border-box; width: 100%; margin-top: 8px; padding: 9px; font: inherit; }
+      button { border: 0; border-radius: 6px; background: #155eef; color: white; cursor: pointer; }
+      button:disabled { background: #9aa4b2; cursor: default; }
+      .muted { color: #52606d; font-size: 12px; }
+      .toggle-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin: 10px 0; }
+      .toggle-box label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
+      .toggle-box input[type="checkbox"] { width: auto; margin: 0; }
+      #status { min-height: 38px; }
+    </style>
+  </head>
+  <body>
+    <h1>AI Web Bridge <span class="badge">Auto Mode</span></h1>
+    
+    <div class="toggle-box">
+      <label>
+        <input type="checkbox" id="autoRun" checked>
+        <span>⚡ Auto-run requests (Zero clicks)</span>
+      </label>
+      <p class="muted" style="margin: 4px 0 0 24px;">Automatically finds and runs the right tab when your CLI asks.</p>
+    </div>
+
+    <p id="status" class="muted">Checking local bridge…</p>
+
+    <label for="port" style="font-weight: 500;">Local bridge port</label>
+    <input id="port" type="number" min="1" max="65535" value="8765">
+    <button id="savePort">Save port</button>
+
+    <p class="muted" style="margin-top: 14px;">Extension ID for one-time native host setup:</p>
+    <input id="extensionId" type="text" readonly>
+
+    <section id="run" hidden style="margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 10px;">
+      <p id="target" style="font-weight: 500;"></p>
+      <button id="runButton">Manual: Run in current tab</button>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

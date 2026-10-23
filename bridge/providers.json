@@ -58,7 +58,7 @@
         "input": "#prompt-textarea, div[contenteditable='true'][role='textbox'], div[contenteditable='true']",
         "send_btn": "button[data-testid='send-button'], button[aria-label*='Send prompt' i], button[aria-label*='Send message' i]",
         "stop_btn": "button[data-testid='stop-button'], button[aria-label*='Stop generating' i], button[aria-label*='Stop response' i]",
-        "response_container": "[data-message-author-role='assistant']",
+        "response_container": "article[data-testid*='conversation-turn'], [data-message-author-role='assistant'], div.agent-turn",
         "response_content": ".markdown, .prose",
         "model_btn": "button[data-testid*='model-switcher' i], button[aria-label*='model' i]",
         "menu_item": "div[role='menu'] button, [role='menuitem'], [role='menuitemradio'], [role='option']",
@@ -95,6 +95,70 @@
         "model_btn": "button[data-testid*='model' i], button[aria-label*='model' i], button:has-text('Sonnet'), button:has-text('Opus')",
         "menu_item": "div[role='menu'] button, [role='menuitem'], [role='menuitemradio'], [role='option']",
         "new_chat": "a[href='/new'], button[aria-label*='New chat' i]"
+      }
+    },
+    "grok": {
+      "adapter": "providers.grok:GrokProvider",
+      "name": "Grok",
+      "url": "https://grok.com/",
+      "login_hint": "sign in to Grok at grok.com",
+      "browser": {
+        "default_browser": "chrome",
+        "engine": "chromium",
+        "connection": "cdp",
+        "port_env": "GROK_CDP_PORT",
+        "default_port": 9225,
+        "profile_env": "GROK_PROFILE_DIR",
+        "edge_profile_env": "EDGE_PROFILE_DIR",
+        "default_profile": "~/AIWebBridgeGrokProfile",
+        "edge_default_profile": "~/AIWebBridgeEdgeGrokProfile"
+      },
+      "timeouts": {
+        "login_seconds": 120,
+        "response_seconds": 300,
+        "response_stable_seconds": 2.5
+      },
+      "selectors": {
+        "input": "textarea[placeholder*='Ask' i], textarea[placeholder*='anything' i], div[contenteditable='true'], textarea",
+        "send_btn": "button[aria-label*='Ask Grok' i], button[aria-label*='Submit' i], button[aria-label*='Send' i], button[type='submit']",
+        "stop_btn": "button[aria-label*='Stop' i]",
+        "response_container": ".response-content, [data-message-author-role='assistant'], .markdown, .prose",
+        "response_content": ".response-content, .markdown, .prose",
+        "model_btn": "button[aria-label*='model' i]",
+        "menu_item": "[role='menuitem'], [role='option']",
+        "new_chat": "a[href='/'], button[aria-label*='New chat' i]"
+      }
+    },
+    "blackbox": {
+      "adapter": "providers.blackbox:BlackboxProvider",
+      "name": "Blackbox",
+      "url": "https://www.blackbox.ai/",
+      "login_hint": "sign in to Blackbox at blackbox.ai",
+      "browser": {
+        "default_browser": "chrome",
+        "engine": "chromium",
+        "connection": "cdp",
+        "port_env": "BLACKBOX_CDP_PORT",
+        "default_port": 9226,
+        "profile_env": "BLACKBOX_PROFILE_DIR",
+        "edge_profile_env": "EDGE_PROFILE_DIR",
+        "default_profile": "~/AIWebBridgeBlackboxProfile",
+        "edge_default_profile": "~/AIWebBridgeEdgeBlackboxProfile"
+      },
+      "timeouts": {
+        "login_seconds": 120,
+        "response_seconds": 300,
+        "response_stable_seconds": 2.5
+      },
+      "selectors": {
+        "input": "textarea#chat-input, textarea[placeholder*='Ask' i], textarea",
+        "send_btn": "button[type='submit'], button[aria-label*='Send' i]",
+        "stop_btn": "button[aria-label*='Stop' i]",
+        "response_container": ".prose, [data-testid='chat-message'], .markdown",
+        "response_content": ".prose, .markdown",
+        "model_btn": "button[aria-label*='model' i]",
+        "menu_item": "[role='menuitem'], [role='option']",
+        "new_chat": "button[aria-label*='New chat' i], a[href='/']"
       }
     }
   }

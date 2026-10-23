@@ -14,6 +14,32 @@ Read only the section needed for the current request.
   everyday profile in managed mode may need its browser closed first so the
   bridge can launch it with debugging enabled; the bridge never closes an
   already-open browser.
+- To use the AI tab already signed in to Chrome or Edge without enabling
+  Remote Debugging, install the optional extension from `browser-extension/`.
+  In Chrome or Edge, open the extensions page, enable Developer mode, and load
+  that folder as an unpacked extension. Copy its ID and register the native
+  helper once by running:
+
+  ```sh
+  python "$BRIDGE_SCRIPT" --extension-setup --extension-id YOUR_EXTENSION_ID
+  ```
+
+  On Windows this registers the helper for the current user without admin
+  access. If Chrome and Edge show different extension IDs, repeat
+  `--extension-id` for each. Then run a request with `--browser-mode extension`.
+  When the CLI waits, open the signed-in provider tab, click the AI Web Bridge
+  extension, and choose **Run waiting request in this tab**. The extension only
+  acts on that tab after the click. It requests no Chrome debugger or cookie
+  access.
+
+  ```sh
+  python "$BRIDGE_SCRIPT" --browser chrome --browser-mode extension --provider gemini --prompt "Summarize the selected task"
+  ```
+
+  The extension uses `127.0.0.1:8765` by default. If the port is occupied,
+  choose a different one with `--extension-port PORT` during setup and for each
+  query, then save that port in the extension popup. Rotate the local secret by
+  rerunning setup with `--extension-rotate` and the registered extension ID.
 - The safer default is the bridge-managed profile. To attach to an existing,
   signed-in Chrome session, use Chrome 144 or newer and install Node.js LTS/npm.
   In Chrome, open `chrome://inspect/#remote-debugging` and enable Remote

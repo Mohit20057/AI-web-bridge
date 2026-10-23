@@ -1,0 +1,10 @@
+You are the Lead Software Architect.
+We are building a clean, modern, standalone web application called "PulseTask" (an offline-first Kanban board with priority filtering, search, and JSON export/import).
+
+Please provide:
+1. Architectural Overview & Component Structure.
+2. The exact Data Models / Schema (Board, Column, Card, Priority).
+3. The complete list of State Management functions required for the logic engine.
+4. UI layout requirements (Header, Search/Filter bar, Kanban Columns, Task Card elements).
+
+Be concise, precise, and practical. Provide clear JavaScript/JSON schemas.

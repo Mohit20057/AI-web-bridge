@@ -29,10 +29,13 @@ except ModuleNotFoundError:
 
 from argon_bridge import (
     _build_comparison_prompt,
+    _load_provider_tasks,
     _multi_output_path,
     _session_profile_scope,
     create_provider,
+    execute_multi_query,
     execute_query,
+    QueryResult,
 )
 from config import ConfigurationError, browser_settings, load_config
 from context_packet import ContextPacketError, load_context_packet
@@ -45,7 +48,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_repo_provider_configuration_is_valid(self):
         config = load_config(BRIDGE / "providers.json")
         self.assertEqual(config["default_provider"], "gemini")
-        self.assertEqual(set(config["providers"]), {"gemini", "chatgpt", "claude"})
+        self.assertEqual(set(config["providers"]), {"gemini", "chatgpt", "claude", "grok", "blackbox"})
         gemini_model_selector = config["providers"]["gemini"]["selectors"]["model_btn"]
         self.assertIn("bard-mode-menu-button", gemini_model_selector)
         self.assertNotIn("button[aria-haspopup='menu']", gemini_model_selector)
@@ -267,6 +270,54 @@ class ComparisonPromptTests(unittest.TestCase):
         )
         self.assertLessEqual(len(rendered), 500)
         self.assertIn("Original context excerpt shortened", rendered)
+
+    def test_realistic_provider_assignments_are_loaded_and_validated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.json"
+            path.write_text(json.dumps({
+                "version": 1,
+                "tasks": {
+                    "gemini": "Find current supported browser-extension APIs and cite official docs.",
+                    "claude": "Review the native messaging design for security risks.",
+                    "chatgpt": "Turn the findings into a prioritized rollout checklist.",
+                },
+            }), encoding="utf-8")
+            tasks = _load_provider_tasks(path, {"gemini": {}, "claude": {}, "chatgpt": {}})
+        self.assertEqual(set(tasks), {"gemini", "claude", "chatgpt"})
+        self.assertIn("security risks", tasks["claude"])
+
+    def test_multi_task_run_sends_each_ai_only_its_assigned_task(self):
+        config = load_config(BRIDGE / "providers.json")
+        args = SimpleNamespace(
+            timeout=1, output=None, provider_models={}, model=None, new_chat=True,
+            record_run=False, diagnostics_dir=None, context_limit_chars=10000,
+            compare_provider=None, browser=None, profile_directory=None,
+            profile_dir=None, cdp_host=None, cdp_port=None, browser_mode=None,
+            extension_port=8765,
+        )
+        tasks = {
+            "gemini": "Find official browser extension API requirements.",
+            "claude": "Review the bridge design for security risks.",
+        }
+        seen = []
+
+        async def fake_execute(prompt, **kwargs):
+            seen.append((kwargs["provider_id"], prompt))
+            return QueryResult(f"Concise findings from {kwargs['provider_id']}.", "test-model")
+
+        with patch("argon_bridge.execute_query", new=fake_execute):
+            exit_code = asyncio.run(execute_multi_query(
+                "## Task context\nBuild a reliable browser AI workflow.",
+                ["gemini", "claude"], config, args, None, None,
+                provider_tasks=tasks,
+            ))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual([provider for provider, _ in seen], ["gemini", "claude"])
+        self.assertIn(tasks["gemini"], seen[0][1])
+        self.assertNotIn(tasks["claude"], seen[0][1])
+        self.assertIn(tasks["claude"], seen[1][1])
+        self.assertNotIn(tasks["gemini"], seen[1][1])
 
 
 if __name__ == "__main__":

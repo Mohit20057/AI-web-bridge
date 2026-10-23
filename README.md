@@ -33,11 +33,12 @@ Gemini, ChatGPT, and Claude are the currently configured services. The models
 and features available depend on what each service shows for your account.
 Chrome and Microsoft Edge are supported. Your browser account must be signed in
 to the service you want to use. Before connecting, the bridge shows which
-browser profile it selected. Chrome users can also choose to connect to an
-already-open, signed-in Chrome session after enabling Remote Debugging and
-approving the connection in Chrome. This gives the bridge access to that
-browser session while it is connected; use it only when you trust the local
-bridge.
+browser profile it selected. Users who want to use an existing signed-in AI
+tab can install the optional browser extension. They approve each request by
+choosing the extension on the AI tab they want to use. Chrome users can also
+connect through Chrome's Remote Debugging feature if they prefer that option.
+See the [browser extension setup guide](browser-extension/README.md) for
+installation and pairing.
 
 ## What is saved
 
@@ -56,16 +57,22 @@ are saved only if you choose an output location or save them yourself.
 ## What is shared
 
 When you send a task, the text and project details you selected are sent to the
-AI service or services you chose. If you choose more than one service, each
-selected service receives the same submitted task details. Each service may
-handle or retain submitted information according to its own account settings
-and privacy terms.
+AI service or services you chose. In a comparison run, each selected service
+receives the same submitted task details. In an assigned-task run, each service
+receives the shared context plus its own task. Each service may handle or retain
+submitted information according to its own account settings and privacy terms.
 
 Review the information before sending it. Include only details you want the
 chosen service to receive. The project can filter some sensitive-looking file
 names, but it cannot guarantee that every secret inside selected text will be
 found. You can inspect the complete assembled request before sending it. Sending
 to multiple services is optional and requires choosing those services.
+
+For different jobs, the CLI skill can assign concise provider-specific tasks in
+one run. It sends each selected service the relevant shared context plus only
+that service's assigned task, then saves separate responses. Providers run one
+at a time. The skill runs the CLI for you; in browser-extension mode you still
+approve each provider turn by clicking the extension on that service's tab.
 
 ## Continuing work and choosing a model
 
@@ -84,6 +91,41 @@ An optional usage report can compare token counts reported by your coding
 assistant for similar tasks. It stores the task category and counts only, not
 the task text or AI responses. Results vary by task and are not a guarantee of
 savings.
+
+## 🤝 Multi-AI Collaboration Workflows
+
+AI Web Bridge acts as a central **Memory Bus and Conductor** across your browser tabs:
+
+### 1. Sequential Handoff (The Relay)
+Delegate different phases of a project to specialist models:
+- **Phase 1 (Architecture):** Claude designs the architecture spec (`_arch_spec.md`).
+- **Phase 2 (Implementation):** ChatGPT reads `_arch_spec.md` and generates backend code (`api.py`).
+- **Phase 3 (Frontend & Tests):** Gemini reads `api.py` and implements frontend UI components.
+
+The CLI automatically distills each AI's output into a clean handoff packet, preventing cross-model hallucination and saving thousands of tokens.
+
+### 2. "All on 1" Council Mode (Consensus & Synthesis)
+When solving a difficult bug or complex algorithm, query multiple frontier models simultaneously and synthesize the best solution:
+```sh
+python bridge/argon_bridge.py --browser-mode extension \
+    --providers gemini,chatgpt,claude \
+    --compare-provider gemini \
+    --prompt "Identify the race condition in this concurrent queue implementation..."
+```
+1. Queries Gemini, ChatGPT, and Claude independently on their tabs.
+2. Hands all candidate solutions to the comparison provider (`gemini`).
+3. Produces a synthesized, consensus-verified master solution in `_argon_comparison_gemini.md`.
+
+### 3. Contract-First Domain Division
+When models work on different layers (e.g. Gemini on React frontend, ChatGPT on Python backend), anchor both models to a shared interface contract (`types.ts` or `openapi.json`) committed to disk.
+
+### 4. Self-Healing Debugger Loop
+When generated code produces runtime errors or failing tests:
+1. Capture the terminal traceback.
+2. Route it to another AI model: *"The previous code produced this error: [traceback]. Fix it."*
+3. Apply the fix and re-run tests automatically.
+
+---
 
 ## Important limits
 

@@ -1,0 +1,21 @@
+You are the Core Systems Engineer.
+Our Lead Architect (Claude) designed the following architecture specification for "PulseTask":
+
+=== ARCHITECTURE SPEC FROM CLAUDE ===
+Data Schema:
+- Boards contain columns and cards.
+- Priorities: urgent, high, medium, low.
+- Columns hold array of cardIds.
+- Cards contain: id, title, description, priority, labels, dueDate, createdAt.
+
+Required Store & Actions:
+- createBoard, addColumn, deleteColumn
+- addCard(columnId, cardData), updateCard(cardId, patch), deleteCard(cardId), moveCard(cardId, targetColId, targetIndex)
+- getVisibleCards(columnId, filters, search)
+- loadData(), saveData(), exportJSON(), importJSON(jsonString)
+=== END SPEC ===
+
+TASK FOR CHATGPT:
+Implement the complete, standalone JavaScript logic module `kanban_engine.js`.
+Ensure it is a self-contained window.PulseTaskEngine object (or ES module) that manages all state, local storage persistence, filtering, and export/import.
+Provide full, production-ready code with zero placeholders.

@@ -1,0 +1,67 @@
+You are the Lead Frontend Engineer.
+Our Lead Architect (Claude) and Core Systems Engineer (ChatGPT) have designed and implemented the backend logic engine for "PulseTask", an offline-first Kanban board application.
+
+The logic engine is already written in `kanban_engine.js` and exposes `window.PulseTaskEngine` globally with this exact API:
+```javascript
+const engine = window.PulseTaskEngine;
+// Board methods:
+const board = engine.createBoard("Project Name"); // returns board object with { id, name, columns, cards }
+const state = engine.getState(); // returns { schemaVersion, boards: [...] }
+
+// Column methods:
+const col = engine.addColumn(boardId, "Column Name"); // returns column object with { id, name, cardIds }
+engine.deleteColumn(columnId);
+
+// Card methods:
+const card = engine.addCard(columnId, {
+  title: "Title",
+  description: "Description",
+  priority: "urgent" | "high" | "medium" | "low",
+  labels: ["tag1", "tag2"],
+  dueDate: "YYYY-MM-DD"
+});
+engine.updateCard(cardId, { title, description, priority, labels, dueDate });
+engine.deleteCard(cardId);
+engine.moveCard(cardId, targetColId, targetIndex);
+
+// Querying:
+const visibleCards = engine.getVisibleCards(columnId, { priorities: ["urgent", "high"] }, "search text");
+
+// Persistence & Export:
+const jsonString = engine.exportJSON();
+engine.importJSON(jsonString);
+engine.subscribe((event) => { /* triggered on any mutation */ });
+```
+
+YOUR TASK:
+Build a complete, stunning, single-file `index.html` web application for PulseTask using:
+1. Modern Tailwind CSS via CDN: `<script src="https://cdn.tailwindcss.com"></script>`
+2. Phosphor or Lucide or Heroicons SVG icons.
+3. Integration with `<script src="kanban_engine.js"></script>`.
+
+Key features required in the UI:
+1. Header:
+   - Modern brand logo & title "PulseTask".
+   - Board title display.
+   - Quick action buttons: "+ New Task", "Export JSON" (triggers download), "Import JSON" (file upload).
+2. Filter & Search Bar:
+   - Live search input (matches title, description, labels).
+   - Priority filter chips (Urgent = red, High = orange, Medium = blue, Low = gray) with active toggle states.
+   - "Clear Filters" button.
+3. Interactive Kanban Board:
+   - Horizontal column layout (To Do, In Progress, Done, plus "+ Add Column" button).
+   - Column headers with task counter badges (e.g. "3 tasks").
+   - Full HTML5 Drag-and-Drop (`dragstart`, `dragover`, `drop`, `dragleave`) to move cards between columns and reorder them within a column using `engine.moveCard()`.
+4. Task Cards:
+   - Clean, modern card design with subtle shadows and hover animations.
+   - Priority badge (color-coded).
+   - Title, description preview, label tags, due date indicator.
+   - Action buttons (Edit modal, Delete).
+5. Add/Edit Card Modal:
+   - Modal popup to create or edit cards (Title, Description, Priority selector, Comma-separated labels, Due Date).
+6. Auto-Seed Initial Data:
+   - On load, if `engine.getState().boards.length === 0`, create a default "PulseTask Launch" board with 3 columns ("To Do", "In Progress", "Done") and 4 sample realistic tasks across different priorities so the user immediately sees a working board!
+7. Realtime reactivity:
+   - Subscribe to `engine.subscribe(() => render())` so the UI automatically re-renders seamlessly whenever any state mutation occurs.
+
+Output the entire standalone `index.html` inside a single markdown ```html code block with NO placeholders. It must run immediately in any browser.

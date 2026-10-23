@@ -26,6 +26,8 @@ _argon_response.md
 _argon_response_*.md
 _argon_comparison_*.md
 _argon_response.*.response.md
+*.response.md
+_live_multi_ai_result*
 _argon_response.*.comparison.md
 _argon_prompt.txt
 _argon_context.json

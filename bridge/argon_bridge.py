@@ -31,6 +31,7 @@ from config import ConfigurationError, browser_settings, load_config
 from browser_profiles import default_user_data_dir, list_browser_profiles, validate_profile_directory
 from chrome_existing_session import ChromeDevToolsSession, ChromeMcpContext
 from context_packet import ContextPacketError, DEFAULT_CONTEXT_LIMIT_CHARS, load_context_packet
+from extension_bridge import DEFAULT_EXTENSION_PORT, ExtensionBridge, read_pairing_token, setup_native_host
 from providers import BrowserUnavailableError, ProviderError
 from sessions import SessionStore
 from usage_metrics import record_usage_sample, summarize_usage
@@ -213,6 +214,107 @@ def create_provider(provider_id: str, config: dict):
     return adapter_type(config)
 
 
+def _run_extension_job(provider_id: str, provider_config: dict, settings: dict, job: dict, timeout: int) -> dict:
+    """Wait for the user-invoked extension to process one local CLI job."""
+    try:
+        token = read_pairing_token()
+    except RuntimeError as exc:
+        raise BrowserUnavailableError(str(exc)) from exc
+    try:
+        bridge = ExtensionBridge(settings.get("port", DEFAULT_EXTENSION_PORT), token)
+        bridge.start()
+    except OSError as exc:
+        raise BrowserUnavailableError(
+            f"Could not start the local extension bridge on 127.0.0.1:{settings.get('port', DEFAULT_EXTENSION_PORT)}. "
+            "Another app may already be using that port; choose another with --extension-port."
+        ) from exc
+    print(f"Provider: {provider_config['name']} ({provider_id})")
+    print(f"Browser: {settings['name'].title()} / installed AI Web Bridge extension")
+    print(f"Local connector port: 127.0.0.1:{bridge.port}")
+    print(
+        "Waiting for the extension. Open the signed-in provider tab, click the extension icon, "
+        "then choose 'Run waiting request'."
+    )
+    try:
+        try:
+            return bridge.run_job(job, timeout)
+        except TimeoutError as exc:
+            raise BrowserUnavailableError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise ProviderError(str(exc)) from exc
+    finally:
+        bridge.close()
+
+
+async def _execute_extension_query(
+    prompt: str,
+    provider_id: str,
+    provider_config: dict,
+    settings: dict,
+    model: str | None,
+    output_file: str | None,
+    new_chat: bool,
+    timeout: int,
+    list_only: bool,
+    record_run: bool,
+    prompt_ref: str | None,
+    context_ref: str | None,
+    return_details: bool,
+    read_latest: bool = False,
+) -> str | list[str] | QueryResult:
+    """Run a provider task through the installed extension and its local loopback broker."""
+    job = {
+        "action": "read_latest" if read_latest else ("list_models" if list_only else "query"),
+        "provider": provider_id,
+        "url": provider_config["url"],
+        "name": provider_config["name"],
+        "selectors": provider_config["selectors"],
+        "prompt": prompt,
+        "model": model,
+        "new_chat": new_chat,
+        "timeout": timeout,
+    }
+    result = _run_extension_job(
+        provider_id,
+        provider_config,
+        settings,
+        job,
+        timeout=timeout + 120,
+    )
+    if list_only:
+        models = result.get("models", [])
+        print("\nAvailable models:\n" + ("\n".join(f"  - {name}" for name in models) if models else "  (No model choices were detected.)"))
+        return models
+
+    response_text = result["text"]
+    selected_model = result.get("model") or model
+    sessions = SessionStore(profile_scope=f"extension:{settings['name']}")
+    if result.get("url"):
+        sessions.save_chat_url(provider_id, result["url"])
+    if record_run:
+        sessions.append_run({
+            "provider": provider_id,
+            "provider_name": provider_config["name"],
+            "model": selected_model,
+            "chat_url": result.get("url"),
+            "prompt_ref": prompt_ref,
+            "context_ref": context_ref,
+            "output_ref": str(Path(output_file).resolve()) if output_file else None,
+        })
+    if output_file:
+        output_path = Path(output_file).resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(response_text, encoding="utf-8")
+        print(f"\nResponse saved → {output_path}")
+    else:
+        print("\n" + "=" * 42 + " RESPONSE " + "=" * 42)
+        print(response_text)
+        print("=" * 94 + "\n")
+    if return_details:
+        return QueryResult(response_text=response_text, selected_model=selected_model)
+    return response_text
+
+
 async def execute_query(
     prompt: str,
     provider_id: str,
@@ -229,9 +331,28 @@ async def execute_query(
     return_details: bool = False,
     diagnostics_dir: str | None = None,
     browser_session: ChromeDevToolsSession | None = None,
+    read_latest: bool = False,
 ) -> str | list[str] | QueryResult:
-    provider = create_provider(provider_id, provider_config)
     browser_settings_value = connection_settings or browser_settings(provider_config)
+    if browser_settings_value.get("mode") == "extension":
+        return await _execute_extension_query(
+            prompt,
+            provider_id,
+            provider_config,
+            browser_settings_value,
+            model,
+            output_file,
+            new_chat,
+            timeout,
+            list_only,
+            record_run,
+            prompt_ref,
+            context_ref,
+            return_details,
+            read_latest=read_latest,
+        )
+
+    provider = create_provider(provider_id, provider_config)
     port = browser_settings_value["port"]
     sessions = SessionStore(
         profile_scope=_session_profile_scope(provider_config, browser_settings_value)
@@ -353,6 +474,27 @@ def _build_comparison_prompt(original_prompt: str, results: list[dict], max_char
     return "".join(rendered_sections)[:max_chars]
 
 
+def _load_provider_tasks(path: str | Path, configured_providers: dict) -> dict[str, str]:
+    """Read a compact v1 provider-to-task assignment file."""
+    tasks_path = Path(path).expanduser().resolve()
+    try:
+        packet = json.loads(tasks_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read a valid tasks JSON file: {exc}") from exc
+    if not isinstance(packet, dict) or packet.get("version") != 1:
+        raise ValueError("Tasks file must be a JSON object with version 1.")
+    tasks = packet.get("tasks")
+    if not isinstance(tasks, dict) or not tasks:
+        raise ValueError("Tasks file requires a non-empty 'tasks' object mapping provider IDs to task strings.")
+    if any(not isinstance(key, str) or not isinstance(value, str) or not value.strip()
+           for key, value in tasks.items()):
+        raise ValueError("Each task must map a provider ID to a non-empty string.")
+    unknown = [provider for provider in tasks if provider not in configured_providers]
+    if unknown:
+        raise ValueError("Unknown provider(s) in tasks file: " + ", ".join(unknown))
+    return tasks
+
+
 def _connection_settings_for(provider_config: dict, args) -> dict:
     settings = browser_settings(provider_config)
     if args.browser:
@@ -414,6 +556,10 @@ def _connection_settings_for(provider_config: dict, args) -> dict:
         settings["mode"] = args.browser_mode
     if settings.get("mode") == "existing" and settings["name"] != "chrome":
         raise ConfigurationError("Existing-session mode currently supports Chrome only; select --browser chrome.")
+    if settings.get("mode") == "extension":
+        if not 1 <= args.extension_port <= 65535:
+            raise ConfigurationError("--extension-port must be an integer between 1 and 65535.")
+        settings["port"] = args.extension_port
     return settings
 
 
@@ -424,6 +570,7 @@ async def execute_multi_query(
     args,
     prompt_ref: str | None,
     context_ref: str | None,
+    provider_tasks: dict[str, str] | None = None,
 ) -> int:
     """Run providers sequentially so shared CDP profiles cannot collide."""
     results: list[dict] = []
@@ -435,9 +582,12 @@ async def execute_multi_query(
         provider_config = config["providers"][provider_id]
         output_path = _multi_output_path(args.output, provider_id)
         started = time.monotonic()
+        provider_prompt = prompt
+        if provider_tasks and provider_id in provider_tasks:
+            provider_prompt += "\n\n## Assigned task for this AI\n" + provider_tasks[provider_id]
         try:
             query_result = await execute_query(
-                prompt,
+                provider_prompt,
                 provider_id=provider_id,
                 provider_config=provider_config,
                 connection_settings=_connection_settings_for(provider_config, args),
@@ -497,7 +647,13 @@ async def execute_multi_query(
         else:
             compare_config = config["providers"][args.compare_provider]
             compare_path = _multi_output_path(args.output, args.compare_provider, "comparison")
-            comparison_prompt = _build_comparison_prompt(prompt, successful, args.context_limit_chars)
+            comparison_context = prompt
+            if provider_tasks:
+                assignments = "\n".join(
+                    f"- {provider_id}: {task}" for provider_id, task in provider_tasks.items()
+                )
+                comparison_context += "\n\n## Provider assignments\n" + assignments
+            comparison_prompt = _build_comparison_prompt(comparison_context, successful, args.context_limit_chars)
             started = time.monotonic()
             try:
                 comparison_result_details = await execute_query(
@@ -559,6 +715,25 @@ async def execute_multi_query(
 
 async def run_doctor(provider_config: dict, provider_id: str, settings: dict) -> int:
     """Inspect configuration and current browser readiness without sending a prompt."""
+    if settings.get("mode") == "extension":
+        job = {
+            "action": "doctor",
+            "provider": provider_id,
+            "url": provider_config["url"],
+            "name": provider_config["name"],
+            "selectors": provider_config["selectors"],
+            "timeout": 10,
+        }
+        try:
+            result = _run_extension_job(provider_id, provider_config, settings, job, timeout=120)
+        except Exception as exc:
+            print(f"Status: {exc}")
+            return 1
+        print(f"Status: {result['text']}")
+        for model_name in result.get("models", []):
+            print(f"  - {model_name}")
+        return 0
+
     if settings.get("mode") == "existing":
         print(f"Provider: {provider_config['name']} ({provider_id})")
         print("Browser: Chrome / existing signed-in session")
@@ -677,6 +852,7 @@ def main() -> None:
     fanout = parser.add_mutually_exclusive_group()
     fanout.add_argument("--providers", help="Comma-separated provider IDs for an explicit multi-provider run")
     fanout.add_argument("--all", action="store_true", help="Send the request to every configured provider")
+    fanout.add_argument("--tasks-file", help="JSON file assigning a distinct task to each provider")
     parser.add_argument("--compare-provider", choices=tuple(config["providers"]),
                         help="Optionally ask this provider to synthesize successful multi-provider replies")
     parser.add_argument("--provider-model", action="append", default=[], metavar="ID=LABEL",
@@ -714,16 +890,44 @@ def main() -> None:
     parser.add_argument("--list-models", action="store_true", help="List model choices visible in the provider UI")
     parser.add_argument("--launch-only", action="store_true", help="Open the configured browser and exit")
     parser.add_argument("--doctor", action="store_true", help="Check browser/provider setup without sending a prompt")
+    parser.add_argument("--read-latest", action="store_true",
+                        help="Read the latest assistant response from the open provider tab without submitting a new prompt")
     parser.add_argument("--list-browser-profiles", action="store_true",
                         help="List named profiles available in the selected browser")
     parser.add_argument("--browser", choices=("chrome", "edge"), help="Browser to use (default: BROWSER or chrome)")
-    parser.add_argument("--browser-mode", choices=("managed", "existing"),
-                        help="Use a bridge-managed profile or Chrome's approved existing session (Chrome 144+)")
+    parser.add_argument("--browser-mode", choices=("managed", "existing", "extension"),
+                        help="Use a managed profile, approved Chrome session, or browser extension")
+    parser.add_argument("--extension-setup", action="store_true",
+                        help="Register the local native host for the browser extension")
+    parser.add_argument("--extension-rotate", action="store_true",
+                        help="Rotate the local extension secret (requires --extension-setup)")
+    parser.add_argument("--extension-id", action="append", default=[],
+                        help="Browser extension ID to authorize; repeat to register Chrome and Edge IDs")
+    parser.add_argument("--extension-port", type=int, default=DEFAULT_EXTENSION_PORT,
+                        help=f"Local extension bridge port (default: {DEFAULT_EXTENSION_PORT})")
     parser.add_argument("--cdp-host", help="CDP host (defaults to localhost)")
     parser.add_argument("--cdp-port", type=int, help="CDP port (default: CDP_PORT, CHROME_DEBUG_PORT, or 9222)")
     parser.add_argument("--profile-dir", help="Dedicated browser profile directory")
     parser.add_argument("--profile-directory", help="Named browser profile folder, such as Default or Profile 1")
     args = parser.parse_args()
+
+    if args.extension_rotate and not args.extension_setup:
+        parser.error("--extension-rotate requires --extension-setup.")
+    if args.extension_id and not args.extension_setup:
+        parser.error("--extension-id requires --extension-setup.")
+    if args.extension_setup:
+        if not 1 <= args.extension_port <= 65535:
+            parser.error("--extension-port must be between 1 and 65535.")
+        try:
+            registered = setup_native_host(args.extension_id, port=args.extension_port, rotate=args.extension_rotate)
+        except (OSError, ValueError) as exc:
+            parser.error(f"Could not register the browser extension: {exc}")
+        print(f"Extension folder: {WORKSPACE_DIR.parent / 'browser-extension'}")
+        print(f"Local bridge port: 127.0.0.1:{args.extension_port}")
+        print("Native host registered for: " + ", ".join(args.extension_id))
+        print("Registration files: " + ", ".join(registered))
+        print("The native host only accepts the registered extension IDs. No pairing code needs to be copied.")
+        return
 
     local_store = SessionStore()
     usage_path = Path(args.usage_file).expanduser().resolve() if args.usage_file else local_store.project_dir / ".ai-web-bridge" / "usage.jsonl"
@@ -794,7 +998,7 @@ def main() -> None:
 
     try:
         if args.list_providers:
-            if args.providers or args.all or args.compare_provider:
+            if args.providers or args.all or args.tasks_file or args.compare_provider:
                 parser.error("--list-providers cannot be combined with multi-provider options.")
             for provider_name, provider_details in config["providers"].items():
                 create_provider(provider_name, provider_details)
@@ -802,14 +1006,21 @@ def main() -> None:
                 print(f"{provider_name}\t{provider_details['name']}{default_label}")
             return
 
-        multi_mode = bool(args.providers or args.all)
+        multi_mode = bool(args.providers or args.all or args.tasks_file)
         if multi_mode and args.provider:
             parser.error("Use --providers or --all instead of --provider for a multi-provider run.")
         if args.compare_provider and not multi_mode:
             parser.error("--compare-provider requires --providers or --all.")
         if multi_mode and (args.list_models or args.launch_only or args.doctor or args.list_browser_profiles):
             parser.error("Multi-provider mode cannot be combined with --list-models, --launch-only, --doctor, or --list-browser-profiles.")
-        if args.providers:
+        provider_tasks = None
+        if args.tasks_file:
+            try:
+                provider_tasks = _load_provider_tasks(args.tasks_file, config["providers"])
+            except ValueError as exc:
+                parser.error(str(exc))
+            provider_ids = list(provider_tasks)
+        elif args.providers:
             provider_ids = [provider.strip() for provider in args.providers.split(",")]
             if any(not provider for provider in provider_ids):
                 parser.error("--providers contains an empty provider ID.")
@@ -861,6 +1072,11 @@ def main() -> None:
                     session = await ChromeDevToolsSession().start()
                     await session.close()
                 asyncio.run(connect_existing_chrome())
+            elif browser_settings_value.get("mode") == "extension":
+                print(
+                    f"Open {provider_config['url']} in the browser with the AI Web Bridge extension, "
+                    "then use --browser-mode extension for a request."
+                )
             else:
                 ensure_browser(browser_settings_value, provider_config["url"])
             return
@@ -871,6 +1087,19 @@ def main() -> None:
             )
             if exit_code:
                 raise SystemExit(exit_code)
+            return
+
+        if args.read_latest:
+            asyncio.run(
+                execute_query(
+                    "",
+                    provider_id=selected_provider,
+                    provider_config=provider_config,
+                    connection_settings=browser_settings_value,
+                    output_file=args.output,
+                    read_latest=True,
+                )
+            )
             return
 
         if args.list_models:
@@ -900,7 +1129,7 @@ def main() -> None:
             if default_file.exists() and not args.context_file:
                 prompt = default_file.read_text(encoding="utf-8")
                 prompt_ref = str(default_file.resolve())
-            elif args.context_file:
+            elif args.context_file or args.tasks_file:
                 prompt = ""
             else:
                 sys.exit("Error: no prompt supplied. Use --prompt TEXT or --prompt-file FILE.")
@@ -926,13 +1155,14 @@ def main() -> None:
         elif args.context_limit_chars != DEFAULT_CONTEXT_LIMIT_CHARS:
             print("Note: --context-limit-chars applies only when --context-file is used.", file=sys.stderr)
 
-        if not prompt.strip():
+        if not prompt.strip() and not provider_tasks:
             sys.exit("Error: the assembled prompt is empty.")
         if multi_mode:
             print(
-                "Multi-provider mode will send the same assembled prompt/context to: "
+                ("Task-routing mode assigns a distinct task to: " if provider_tasks else
+                 "Multi-provider mode will send the same assembled prompt/context to: ")
                 + ", ".join(provider_ids)
-                + ". Each provider is run sequentially and receives its own output file.",
+                + ". Providers run sequentially and receive separate output files.",
                 file=sys.stderr,
             )
             if args.compare_provider:
@@ -941,7 +1171,14 @@ def main() -> None:
                     file=sys.stderr,
                 )
         if args.review_context:
-            print(prompt)
+            if provider_tasks:
+                for provider_id, assigned_task in provider_tasks.items():
+                    provider_prompt = prompt + "\n\n## Assigned task for this AI\n" + assigned_task
+                    print(f"--- Request for {provider_id} ({len(provider_prompt):,} characters) ---")
+                    print(provider_prompt)
+                    print()
+            else:
+                print(prompt)
             return
 
         if args.context_file and not args.no_handoff:
@@ -957,6 +1194,7 @@ def main() -> None:
                     args=args,
                     prompt_ref=prompt_ref,
                     context_ref=context_ref,
+                    provider_tasks=provider_tasks,
                 )
             )
             if exit_code:

@@ -1,97 +1,101 @@
 ---
 name: use-argon-web
 description: |
-  Delegate a question or coding task to a configured browser-based Gemini,
-  ChatGPT, or Claude session through AI Web Bridge. Activate when the user says
-  "use argon", "ask argon", "use argon web", or asks to consult browser AI.
+  Delegate queries, coding tasks, architecture designs, multi-turn reasoning,
+  and debugging to web AI models (Gemini Argon, Claude, ChatGPT, Grok, Blackbox)
+  running in your own logged-in browser — no API key required.
+  Supports multi-AI sequential handoffs, "all on one" council consensus, and
+  self-healing error loops.
+  Activate whenever the user says:
+  - "use argon web"
+  - "ask argon"
+  - "use argon"
+  - "use chatgpt"
+  - "use claude"
+  - "use grok"
+  - "use blackbox"
+  - "ask council" / "ask all ais"
 license: Apache-2.0
 metadata:
-  version: v5
+  version: v3
   author: Mohit20057
   repo: https://github.com/Mohit20057/AI-web-bridge
 ---
 
-# Use AI Web Bridge
+# Multi-AI Web Bridge (Gemini, ChatGPT, Claude, Grok, Blackbox)
 
-Send substantial reasoning or drafting to the selected browser AI. Keep CLI
-context, returned text, and round trips small; savings depend on the task.
+This skill connects any AI coding CLI (Antigravity, Cursor, Aider, Claude Code)
+directly to your logged-in browser AI models via the zero-click background extension
+and CDP bridge. No API keys. Zero token costs.
 
-## Rules
+---
 
-- Choose the browser once per chat. Reuse a browser the user named earlier in
-  this conversation. If they have not chosen one, ask once which to use (Chrome
-  or Edge), remember it for this chat, and pass it with `--browser` on each
-  bridge call. Ask again only if the user requests a change.
-- Use one provider by default. Preserve that provider's chat for follow-ups. A
-  different provider cannot see the old provider's history, so give it a small
-  handoff packet.
-- Never send the full CLI transcript, repository, or unchanged files. Include
-  only the task, relevant changes/errors, constraints, and selected excerpts.
-- Ask for a concise answer, focused diff, or exact replacement. Read only the
-  output needed to apply the answer; do not restate its reasoning.
-- Use `--providers` or `--all` only when the user requests multiple opinions.
-  Every selected site receives the same context and provider use increases.
-  Prefer `--compare-provider` over loading all answers into CLI context.
-- Include only content appropriate to send to a web service. The bridge filters
-  common secret-looking paths, but does not scan ordinary file contents.
-- The bridge keeps a compact, project-local handoff from submitted context
-  packets (task, project summary, and recent changes only). Use `--no-handoff`
-  for a request that should neither read nor save it; use the forget options to
-  clear saved data. Never place selected file contents or full chat transcripts
-  into the handoff.
+## CRITICAL RULES (Read Every Time)
 
-## Workflow
+1. **MULTI-TURN PERSISTENCE (DO NOT STOP AFTER 1 OUTPUT)**
+   - When the user asks to use web AI for a task, you are in **AI-Assisted Mode**.
+   - For multi-step tasks, follow-up questions, or code-then-test cycles,
+     **continue consulting the web AI for every subsequent step or error**.
+   - Do NOT stop after 1 output or revert to answering alone unless the user
+     explicitly says to exit this mode.
 
-1. Resolve `BRIDGE_SCRIPT` to the repository's `bridge/argon_bridge.py`.
-   Setup and browser-specific options are in the repository README.
-   After changing provider or browser profile, run `--doctor` once; don't repeat
-   it for every follow-up unless sign-in or browser state changed. Use the
-   managed browser by default. If the user asks to use their already-open,
-   signed-in Chrome session, pass `--browser chrome --browser-mode existing`;
-   this requires Chrome 144+, Node.js/npm, Remote Debugging enabled, and the
-   user's approval in Chrome. See [advanced options](references/advanced-options.md).
-2. For project work, prepare `_argon_context.json` with `version: 1`, a short
-   `task`, and only necessary `project_summary`, `recent_changes`, `files`,
-   `errors`, `constraints`, or `requested_output` fields. The bridge carries
-   forward a missing project summary or recent-changes note from its compact
-   local handoff, including when switching providers. Use selected snippets or
-   focused diffs; don't inspect more files just to fill the packet. For a
-   simple question, use `_argon_prompt.txt` or `--prompt`.
-3. Before sending sensitive context or when the user asks to review it, run
-   `python "$BRIDGE_SCRIPT" --context-file _argon_context.json --review-context`.
-   This prints the exact payload and does not contact a provider. Avoid reading
-   the full preview into the CLI's model context unless it is needed for review.
-4. Send one request and save the result:
+2. **SESSION CONTINUITY**
+   - **New unrelated task**: pass `--new-chat` to start a fresh conversation thread.
+   - **Follow-up / sub-step**: **omit `--new-chat`** so the web AI remembers previous context.
 
-   ```sh
-   python "$BRIDGE_SCRIPT" --context-file _argon_context.json --out _argon_response.md
+3. **MULTI-AI COMMUNICATION PATTERNS**
+   - **Sequential Handoff (Relay)**:
+     When using different AIs for different parts (e.g. Claude for architecture ➔
+     ChatGPT for backend ➔ Gemini for frontend/docs):
+     Extract the clean code or spec from AI #1, build a clean prompt in `_argon_prompt.txt`,
+     and pass it to AI #2 with `--provider <next_provider>`.
+   - **"All on One" (Council / Consensus Mode)**:
+     When multiple models should evaluate the exact same tough problem:
+     Use `--providers gemini,chatgpt,claude --compare-provider gemini` to collect
+     all perspectives and produce an evaluated, synthesized consensus answer in `_argon_comparison_gemini.md`.
+   - **Contract-First Domain Division**:
+     When models work on different layers (frontend vs backend), lock the interface
+     file (`types.ts` or `openapi.json`) on disk first. Instruct both models to adhere
+     strictly to that contract.
+
+4. **SELF-HEALING ERROR LOOP**
+   - If code from any web AI fails with an error, do NOT give up or rewrite yourself.
+   - Capture the full traceback, form a debugging prompt
+     (*"Your previous solution gave this error: [traceback]. Please fix it."*),
+     and call the bridge again. You can also pass the error to another provider for a second opinion.
+
+---
+
+## Execution Workflows
+
+### 1. Standard Single AI Query (Default: Gemini)
+```bash
+echo "Explain this codebase" > _argon_prompt.txt
+python bridge/argon_bridge.py --browser-mode extension --provider gemini --prompt-file _argon_prompt.txt --out _argon_response.md
+```
+*(Replace `--provider gemini` with `chatgpt`, `claude`, `grok`, or `blackbox` as requested).*
+
+### 2. "All on One" Council Mode (Consensus & Synthesis)
+When solving a difficult bug or architectural decision where multiple models should debate:
+```bash
+python bridge/argon_bridge.py --browser-mode extension \
+    --providers gemini,chatgpt,claude \
+    --compare-provider gemini \
+    --prompt-file _argon_prompt.txt \
+    --out _council_result.md
+```
+1. Queries each provider in turn on their open tabs.
+2. Hands all candidate solutions to the comparison provider (`gemini`).
+3. Reads the synthesized, consensus-verified solution from `_argon_comparison_gemini.md`.
+
+### 3. Sequential Multi-AI Handoff
+1. **Turn 1 (Claude - Architecture):**
+   ```bash
+   python bridge/argon_bridge.py --browser-mode extension --provider claude --prompt-file _arch_prompt.txt --out _arch_spec.md
    ```
-
-   For a simple prompt, use `--prompt-file _argon_prompt.txt`. To start fresh,
-   add `--new-chat`. Select a provider with `--provider NAME`; inspect visible
-   models using `--provider NAME --list-models`, then use `--model LABEL` only
-   when the user wants a specific available model. Use repeated
-   `--provider-model ID=LABEL` for different models in an explicit fan-out.
-5. Read the concise response, apply or present it, and stop. Make one focused
-   follow-up only if the result is incomplete, an error needs diagnosis, or the
-   user asks. Clean temporary packet/prompt/response files when the task ends.
-
-For an explicitly requested multi-provider run, use
-`--providers gemini,chatgpt` or `--all`. The bridge saves one result per site
-and prints a status summary. This is always opt-in because every selected site
-receives the same task context. Add `--compare-provider NAME` only when
-synthesis helps; its bounded comparison is saved separately.
-
-For browser-profile selection, readiness checks, local-data cleanup, and
-measured token comparisons, consult [advanced options](references/advanced-options.md)
-only when that feature is needed.
-
-## Browser-only use
-
-Browser AI websites do not load this skill, local CLI history, or repository
-files. A browser-only user must prepare or review a compact prompt/context
-packet locally, paste it into the website, and carry the answer back manually.
-No cross-site history or local-file access is implied.
-
-See [SKILL_SPEC.md](../../SKILL_SPEC.md) for per-CLI installation paths and the
-common invocation examples.
+2. **Turn 2 (ChatGPT - Backend Implementation):**
+   Create `_backend_prompt.txt` bundling `_arch_spec.md` + task:
+   ```bash
+   python bridge/argon_bridge.py --browser-mode extension --provider chatgpt --prompt-file _backend_prompt.txt --out _backend_code.md
+   ```
+3. Apply files to project and run tests.
