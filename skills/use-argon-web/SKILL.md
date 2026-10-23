@@ -68,20 +68,25 @@ and CDP bridge. No API keys. Zero token costs.
 
 ## Execution Workflows
 
+> **Global Path on this machine:**
+> - **Python Runtime:** `D:\AI-web-bridge\.venv\Scripts\python.exe`
+> - **Bridge Script:** `D:\AI-web-bridge\bridge\argon_bridge.py`
+>
+> *(In PowerShell on Windows, invoke using: `& "D:\AI-web-bridge\.venv\Scripts\python.exe" "D:\AI-web-bridge\bridge\argon_bridge.py" <args>`)*
+
 ### 1. Standard Single AI Query (Default: Gemini)
-```bash
-echo "Explain this codebase" > _argon_prompt.txt
-python bridge/argon_bridge.py --browser-mode extension --provider gemini --prompt-file _argon_prompt.txt --out _argon_response.md
+```powershell
+& "D:\AI-web-bridge\.venv\Scripts\python.exe" "D:\AI-web-bridge\bridge\argon_bridge.py" --browser-mode extension --provider gemini --prompt-file _argon_prompt.txt --out _argon_response.md
 ```
 *(Replace `--provider gemini` with `chatgpt`, `claude`, `grok`, or `blackbox` as requested).*
 
 ### 2. "All on One" Council Mode (Consensus & Synthesis)
 When solving a difficult bug or architectural decision where multiple models should debate:
-```bash
-python bridge/argon_bridge.py --browser-mode extension \
-    --providers gemini,chatgpt,claude \
-    --compare-provider gemini \
-    --prompt-file _argon_prompt.txt \
+```powershell
+& "D:\AI-web-bridge\.venv\Scripts\python.exe" "D:\AI-web-bridge\bridge\argon_bridge.py" --browser-mode extension `
+    --providers gemini,chatgpt,claude `
+    --compare-provider gemini `
+    --prompt-file _argon_prompt.txt `
     --out _council_result.md
 ```
 1. Queries each provider in turn on their open tabs.
@@ -90,12 +95,12 @@ python bridge/argon_bridge.py --browser-mode extension \
 
 ### 3. Sequential Multi-AI Handoff
 1. **Turn 1 (Claude - Architecture):**
-   ```bash
-   python bridge/argon_bridge.py --browser-mode extension --provider claude --prompt-file _arch_prompt.txt --out _arch_spec.md
+   ```powershell
+   & "D:\AI-web-bridge\.venv\Scripts\python.exe" "D:\AI-web-bridge\bridge\argon_bridge.py" --browser-mode extension --provider claude --prompt-file _arch_prompt.txt --out _arch_spec.md
    ```
 2. **Turn 2 (ChatGPT - Backend Implementation):**
    Create `_backend_prompt.txt` bundling `_arch_spec.md` + task:
-   ```bash
-   python bridge/argon_bridge.py --browser-mode extension --provider chatgpt --prompt-file _backend_prompt.txt --out _backend_code.md
+   ```powershell
+   & "D:\AI-web-bridge\.venv\Scripts\python.exe" "D:\AI-web-bridge\bridge\argon_bridge.py" --browser-mode extension --provider chatgpt --prompt-file _backend_prompt.txt --out _backend_code.md
    ```
 3. Apply files to project and run tests.
