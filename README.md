@@ -101,15 +101,15 @@ Different models excel at different things. Let each model do what it does best:
 ```bash
 # Step 1: Claude architects the system blueprint
 python bridge/argon_bridge.py --browser-mode extension --provider claude \
-  --prompt-file demo_prompts/01_claude_architect.txt --out demo_outputs/01_claude_spec.md
+  --prompt-file _arch_prompt.txt --out _arch_spec.md
 
 # Step 2: ChatGPT builds the core business logic engine
 python bridge/argon_bridge.py --browser-mode extension --provider chatgpt \
-  --prompt-file demo_prompts/02_chatgpt_engine.txt --out demo_outputs/02_chatgpt_engine.md
+  --prompt-file _backend_prompt.txt --out _kanban_engine.js
 
 # Step 3: Gemini Argon builds the responsive frontend UI
 python bridge/argon_bridge.py --browser-mode extension --provider gemini --model "Argon" \
-  --prompt-file demo_prompts/03_gemini_ui.txt --out demo_outputs/03_gemini_ui.md
+  --prompt-file _ui_prompt.txt --out _index.html
 ```
 
 ### 2. "All on One" Council Mode (Consensus & Synthesis)
@@ -134,19 +134,13 @@ python bridge/argon_bridge.py --browser-mode extension --provider chatgpt --read
 
 ---
 
-## 🏆 Real-World Showcase: "PulseTask" App
+## 🏆 Real-World Case Study: "PulseTask" App
 
-This repository includes a complete offline-first Kanban board application built **live and end-to-end** by Claude, ChatGPT, and Gemini Argon working in sequence:
+AI Web Bridge was battle-tested by orchestrating a complete offline-first Kanban board application built **live and end-to-end** across three competing AI models in sequence:
 
-- **Architecture Spec:** Built by Claude 3.5 Sonnet ([`demo_outputs/01_claude_spec.md`](demo_outputs/01_claude_spec.md))
-- **Logic Engine:** Built by ChatGPT ([`demo_project/kanban_engine.js`](demo_project/kanban_engine.js) — 668 lines, 0 syntax errors)
-- **Frontend UI:** Built by Gemini Argon ([`demo_project/index.html`](demo_project/index.html) — 1,696 lines with Tailwind CSS and HTML5 Drag-and-Drop)
-
-### Run the Demo Locally:
-```bash
-python -m http.server 8080 --directory demo_project
-```
-Then open **[http://localhost:8080/index.html](http://localhost:8080/index.html)** in your browser!
+- **Architecture Spec:** Designed by **Anthropic Claude 3.5 Sonnet** (Normalized schemas, actions, store contracts, and UI guidelines).
+- **Logic Engine:** Coded by **OpenAI ChatGPT** (Pure JavaScript state engine — 668 lines, 0 syntax errors).
+- **Frontend UI:** Built by **Google Gemini Argon** (Responsive layout with Tailwind CSS and HTML5 Drag-and-Drop — 1,696 lines).
 
 ---
 
