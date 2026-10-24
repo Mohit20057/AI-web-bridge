@@ -323,21 +323,28 @@ class ExtensionBridge:
         self._thread.start()
         return self
 
-    def run_job(self, job: dict[str, Any], timeout: int) -> dict[str, Any]:
+    def run_job(self, job: dict[str, Any], timeout: int, claim_timeout: int = 60) -> dict[str, Any]:
         with self._condition:
             self._job = {**job, "id": secrets.token_urlsafe(16)}
             self._result = None
             self._claimed = False
             self._condition.notify_all()
-            deadline = time.monotonic() + timeout
+            start_time = time.monotonic()
+            deadline = start_time + timeout
             while self._result is None:
-                remaining = deadline - time.monotonic()
+                now = time.monotonic()
+                if not self._claimed and (now - start_time) > claim_timeout:
+                    prov = job.get("provider", "provider")
+                    raise TimeoutError(
+                        f"No active tab found for '{prov}' within {claim_timeout}s. "
+                        f"Please open and sign in to {prov} in your browser."
+                    )
+                remaining = deadline - now
                 if remaining <= 0:
                     raise TimeoutError(
-                        "No result arrived from the extension. Open the selected AI tab, click the AI Web Bridge icon, "
-                        "and choose 'Run waiting request' before the timeout."
+                        "No result arrived from the extension before the timeout."
                     )
-                self._condition.wait(min(remaining, 1.0))
+                self._condition.wait(min(remaining, 0.5))
             result = self._result
             self._job = None
             self._result = None

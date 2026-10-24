@@ -35,6 +35,20 @@ from extension_bridge import DEFAULT_EXTENSION_PORT, ExtensionBridge, read_pairi
 from providers import BrowserUnavailableError, ProviderError
 from sessions import SessionStore
 from usage_metrics import record_usage_sample, summarize_usage
+from envelope import (
+    BRIDGE_START,
+    BRIDGE_END,
+    CONTINUATION_PROMPT,
+    BridgeResponse,
+    build_prompt_envelope,
+    extract_bridge_payload,
+    stitch_continuation,
+)
+from handoff import HandoffManager
+from repo_context import build_repo_context, build_repo_map
+from verifier import apply_patch_or_fallback, format_fixer_prompt, run_verification
+from council import build_council_round1_prompt, build_council_round2_prompt
+from orchestrator import BridgeOrchestrator, StageResult
 
 
 WORKSPACE_DIR = Path(__file__).resolve().parent
@@ -220,14 +234,20 @@ def _run_extension_job(provider_id: str, provider_config: dict, settings: dict, 
         token = read_pairing_token()
     except RuntimeError as exc:
         raise BrowserUnavailableError(str(exc)) from exc
-    try:
-        bridge = ExtensionBridge(settings.get("port", DEFAULT_EXTENSION_PORT), token)
-        bridge.start()
-    except OSError as exc:
-        raise BrowserUnavailableError(
-            f"Could not start the local extension bridge on 127.0.0.1:{settings.get('port', DEFAULT_EXTENSION_PORT)}. "
-            "Another app may already be using that port; choose another with --extension-port."
-        ) from exc
+    bridge = None
+    bind_start = time.monotonic()
+    port = settings.get("port", DEFAULT_EXTENSION_PORT)
+    while bridge is None:
+        try:
+            bridge = ExtensionBridge(port, token)
+            bridge.start()
+        except OSError as exc:
+            if time.monotonic() - bind_start > 120:
+                raise BrowserUnavailableError(
+                    f"Could not start the local extension bridge on 127.0.0.1:{port}. "
+                    "Another app may already be using that port; choose another with --extension-port."
+                ) from exc
+            time.sleep(0.5)
     print(f"Provider: {provider_config['name']} ({provider_id})")
     print(f"Browser: {settings['name'].title()} / installed AI Web Bridge extension")
     print(f"Local connector port: 127.0.0.1:{bridge.port}")
@@ -838,6 +858,53 @@ async def run_doctor(provider_config: dict, provider_id: str, settings: dict) ->
         return 1
 
 
+def create_orchestrator(args, config: dict) -> BridgeOrchestrator:
+    async def _query_executor(
+        prompt: str,
+        provider_id: str,
+        new_chat: bool = True,
+        output_file: str | None = None,
+    ) -> str:
+        provider_config = config["providers"].get(provider_id)
+        if not provider_config:
+            raise ProviderError(f"Unknown provider: '{provider_id}'")
+        connection_settings = _connection_settings_for(provider_config, args)
+        timeout = args.timeout or int(provider_config.get("timeouts", {}).get("response_seconds", 300))
+        model = getattr(args, "provider_models", {}).get(provider_id, args.model) if hasattr(args, "provider_models") else args.model
+
+        import contextlib
+        import io
+
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink):
+            result = await execute_query(
+                prompt=prompt,
+                provider_id=provider_id,
+                provider_config=provider_config,
+                connection_settings=connection_settings,
+                model=model,
+                output_file=output_file,
+                new_chat=new_chat,
+                timeout=timeout,
+                record_run=args.record_run,
+                return_details=True,
+                diagnostics_dir=args.diagnostics_dir,
+            )
+        if isinstance(result, QueryResult):
+            return result.response_text
+        return str(result)
+
+    prompts_dir = WORKSPACE_DIR.parent / "prompts"
+    if not prompts_dir.exists():
+        prompts_dir = Path.cwd() / "prompts"
+
+    return BridgeOrchestrator(
+        project_dir=Path.cwd(),
+        query_executor=_query_executor,
+        prompts_dir=prompts_dir,
+    )
+
+
 def main() -> None:
     try:
         config = load_config()
@@ -909,6 +976,29 @@ def main() -> None:
     parser.add_argument("--cdp-port", type=int, help="CDP port (default: CDP_PORT, CHROME_DEBUG_PORT, or 9222)")
     parser.add_argument("--profile-dir", help="Dedicated browser profile directory")
     parser.add_argument("--profile-directory", help="Named browser profile folder, such as Default or Profile 1")
+
+    # Subcommands and lifecycle
+    parser.add_argument("subcommand", nargs="?", choices=("init", "sync", "handoff", "status"),
+                        help="Optional lifecycle command (init, sync, handoff, status)")
+    parser.add_argument("--pipeline", help="Path to a YAML or JSON pipeline definition to execute")
+    parser.add_argument("--template", help="Role template to use (e.g. architect, engine, ui, reviewer, analyst)")
+    parser.add_argument("--role", help="Explicit role name (defaults to template name or 'general')")
+    parser.add_argument("--task", help="Direct task description string")
+    parser.add_argument("--task-file", help="Path to file containing task instructions")
+    parser.add_argument("--context-files", help="Comma-separated paths of full files to include in prompt envelope context")
+    parser.add_argument("--contract", help="Binding contract file path to enforce")
+    parser.add_argument("--in", "--input", dest="in_files", action="append", default=[],
+                        help="Input file(s) from previous stage (can repeat or use comma-separated list)")
+    parser.add_argument("--verify", help="Verification command to execute after generation")
+    parser.add_argument("--max-retries", type=int, default=2, help="Maximum fixer loop retry attempts (default: 2)")
+    parser.add_argument("--cache", action="store_true", help="Cache and reuse responses using hash of prompt + context")
+    parser.add_argument("--quiet", action="store_true", default=None, help="Quiet output: print only one status line per job")
+    parser.add_argument("--print-output", action="store_true", help="Print extracted response content to stdout")
+    parser.add_argument("--max-output-lines", type=int, default=20, help="Maximum lines to print when previewing output")
+    parser.add_argument("--to", help="Target provider for handoff command")
+    parser.add_argument("--goal", help="Project goal description for init and handoff")
+    parser.add_argument("--council", action="store_true", help="Run council consensus mode with Round 1 debate + Round 2 synthesis")
+    parser.add_argument("--cross-review", help="Provider ID to cross-review the generated code against the contract")
     args = parser.parse_args()
 
     if args.extension_rotate and not args.extension_setup:
@@ -927,6 +1017,165 @@ def main() -> None:
         print("Native host registered for: " + ", ".join(args.extension_id))
         print("Registration files: " + ", ".join(registered))
         print("The native host only accepts the registered extension IDs. No pairing code needs to be copied.")
+        return
+
+    # Auto-sync working tree changes on every invocation
+    handoff_mgr = HandoffManager(Path.cwd())
+    sync_result = None
+    if (Path.cwd() / ".bridge").exists():
+        sync_result = handoff_mgr.auto_sync()
+
+    if args.subcommand == "init":
+        msg = handoff_mgr.init_project(goal=args.goal or "Project initialization")
+        print(msg)
+        return
+
+    if args.subcommand == "sync":
+        if sync_result:
+            print(sync_result)
+        else:
+            res2 = handoff_mgr.auto_sync()
+            if res2:
+                print(res2)
+            else:
+                print("Synced. Working tree clean; no manual edits detected.")
+        return
+
+    if args.subcommand == "status":
+        print(handoff_mgr.get_status_summary())
+        return
+
+    if args.subcommand == "handoff":
+        if not args.to:
+            parser.error("bridge handoff requires --to <provider>.")
+        orchestrator = create_orchestrator(args, config)
+        asyncio.run(
+            orchestrator.handoff_command(
+                to_provider=args.to,
+                goal=args.goal,
+                use_cache=args.cache,
+                print_output=args.print_output,
+                max_output_lines=args.max_output_lines,
+            )
+        )
+        return
+
+    if args.pipeline:
+        orchestrator = create_orchestrator(args, config)
+        quiet = True if args.quiet is None else args.quiet
+        results = asyncio.run(
+            orchestrator.run_pipeline(
+                pipeline_path=args.pipeline,
+                use_cache=args.cache,
+                max_retries=args.max_retries,
+                quiet=quiet,
+                print_output=args.print_output,
+                max_output_lines=args.max_output_lines,
+            )
+        )
+        if any(r.status != "COMPLETE" or r.verify == "FAIL" for r in results):
+            sys.exit(1)
+        return
+
+    if args.council or (args.compare_provider and args.providers and len(args.providers.split(",")) > 1):
+        orchestrator = create_orchestrator(args, config)
+        provider_ids = [p.strip() for p in args.providers.split(",")] if args.providers else list(config["providers"])
+        synth_provider = args.compare_provider or provider_ids[0]
+        council_task = ""
+        if args.task_file:
+            tf = Path(args.task_file)
+            if not tf.exists():
+                sys.exit(f"Error: task file '{args.task_file}' not found.")
+            council_task = tf.read_text(encoding="utf-8", errors="ignore").strip()
+        elif args.file:
+            council_task = Path(args.file).read_text(encoding="utf-8", errors="ignore").strip()
+        elif args.prompt:
+            council_task = args.prompt
+        else:
+            parser.error("Council mode requires a task (--prompt, --task-file, or --file).")
+        asyncio.run(
+            orchestrator.council_command(
+                task=council_task,
+                providers=provider_ids,
+                synthesizer_provider=synth_provider,
+                output_file=args.output,
+                print_output=args.print_output,
+            )
+        )
+        return
+
+    is_envelope_stage = not args.read_latest and bool(
+        args.template
+        or args.task
+        or args.task_file
+        or args.contract
+        or args.in_files
+        or args.verify
+        or args.role
+        or args.output
+        or (args.to and not args.prompt and not args.file)
+    )
+    if is_envelope_stage:
+        orchestrator = create_orchestrator(args, config)
+        task_text = ""
+        if args.task:
+            task_text = args.task
+        elif args.task_file:
+            tf = Path(args.task_file)
+            if not tf.exists():
+                sys.exit(f"Error: task file '{args.task_file}' not found.")
+            task_text = tf.read_text(encoding="utf-8", errors="ignore").strip()
+        elif args.file:
+            task_text = Path(args.file).read_text(encoding="utf-8", errors="ignore").strip()
+        elif args.prompt:
+            task_text = args.prompt
+        elif args.template or args.role:
+            task_text = f"Execute {args.role or args.template} stage"
+        else:
+            task_text = "Execute requested bridge job"
+
+        in_files_list = []
+        for item in args.in_files:
+            for part in item.split(","):
+                part_clean = part.strip()
+                if part_clean:
+                    in_files_list.append(part_clean)
+
+        context_files_list = []
+        if args.context_files:
+            for part in args.context_files.split(","):
+                part_clean = part.strip()
+                if part_clean:
+                    context_files_list.append(part_clean)
+
+        target_provider = args.to or args.provider or default_provider
+        stage_role = args.role or args.template or "general"
+        quiet = True if args.quiet is None else args.quiet
+
+        stage_res = asyncio.run(
+            orchestrator.run_stage(
+                task=task_text,
+                provider=target_provider,
+                role=stage_role,
+                template=args.template,
+                stage_num=1,
+                total_stages=1,
+                input_files=in_files_list,
+                out_file=args.output,
+                context_files=context_files_list,
+                contract_file=args.contract,
+                verify_cmd=args.verify,
+                max_retries=args.max_retries,
+                use_cache=args.cache,
+                new_chat=args.new_chat,
+                cross_review_provider=args.cross_review,
+                quiet=quiet,
+                print_output=args.print_output,
+                max_output_lines=args.max_output_lines,
+            )
+        )
+        if stage_res.status != "COMPLETE" or stage_res.verify == "FAIL":
+            sys.exit(1)
         return
 
     local_store = SessionStore()
@@ -1216,7 +1465,7 @@ def main() -> None:
                     diagnostics_dir=args.diagnostics_dir,
                 )
             )
-    except ProviderError as exc:
+    except (ProviderError, BrowserUnavailableError) as exc:
         sys.exit(f"Bridge error: {exc}")
     except ConfigurationError as exc:
         sys.exit(f"Configuration error: {exc}")

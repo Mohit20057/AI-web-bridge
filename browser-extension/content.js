@@ -88,24 +88,15 @@
     ].join(", ")).filter(isVisible);
     if (assistantSpecific.length) return assistantSpecific;
 
-    // 3. Modern ChatGPT: elements inside data-talvt-turn-state, data-turn-key, or parent of turn-action-controls
+    // 3. Modern ChatGPT: elements inside data-talvt-turn-state, data-turn-key
     const chatGptTurns = selectAll("[data-talvt-turn-state], [data-turn-key]");
     if (chatGptTurns.length) {
       const assistantBlocks = [];
       for (const turn of chatGptTurns) {
         if (!isVisible(turn)) continue;
-        const allDivs = [...turn.querySelectorAll("div")];
-        const gptDiv = allDivs.find(d => /^ChatGPT said:/i.test(visibleText(d))) ||
-                       allDivs.find(d => isVisible(d) && visibleText(d).length > 50 && !/^You said:/i.test(visibleText(d)) && d.querySelector("pre, code, p, h1, h2, h3"));
-        if (gptDiv) {
-          assistantBlocks.push(gptDiv);
-        } else if (turn.children && turn.children[0] && turn.children[0].children) {
-          const subs = [...turn.children[0].children];
-          if (subs.length >= 2) {
-            assistantBlocks.push(subs[subs.length - 1]);
-          } else if (subs.length === 1) {
-            assistantBlocks.push(subs[0]);
-          }
+        const asstBlock = turn.querySelector("[data-content-search-unit-key*='assistant'], [data-chatgpt-search-unit-key*='assistant']");
+        if (asstBlock && isVisible(asstBlock)) {
+          assistantBlocks.push(asstBlock);
         }
       }
       if (assistantBlocks.length) return assistantBlocks;
@@ -141,10 +132,70 @@
     let text = "";
     try {
       const clone = inner.cloneNode(true);
-      for (const btn of clone.querySelectorAll("button, [role='button'], .copy-button, [aria-label*='Copy' i], [data-testid*='copy' i], .turn-action-controls")) {
-        btn.remove();
+      const codeBlocks = [];
+
+      // 1. Gemini code-block custom element
+      for (const cb of clone.querySelectorAll("code-block, .code-block")) {
+        const langSpan = cb.querySelector(".code-block-decoration span");
+        const lang = (langSpan?.textContent || "").trim();
+        const codeEl = cb.querySelector("code[data-test-id='code-content'], pre code, pre") || cb;
+        const codeText = codeEl.textContent || "";
+        const placeholder = `__AI_BRIDGE_CODE_BLOCK_${codeBlocks.length}__`;
+        codeBlocks.push("\n```" + (lang || "").toLowerCase() + "\n" + codeText.trimEnd() + "\n```\n");
+        cb.replaceWith(document.createTextNode(placeholder));
       }
-      text = visibleText(clone);
+
+      // 2. Modern ChatGPT / CodeMirror code blocks
+      const codeContainers = clone.querySelectorAll("[data-code-block='true'], .CodeBlock-zu1QM3, .cm-editor");
+      for (const cb of codeContainers) {
+        const cmContent = cb.querySelector(".cm-content");
+        const lang = cmContent?.getAttribute("data-language") ||
+                     cb.querySelector(".ActionBar-KWWAct .truncate, .sticky .truncate")?.textContent?.trim() || "";
+        let codeText = "";
+        if (cmContent) {
+          const lines = [...cmContent.querySelectorAll(".cm-line")].map(line => {
+            if (line.querySelector("br") && line.textContent.trim() === "") return "";
+            return line.textContent || "";
+          });
+          codeText = lines.join("\n");
+        } else {
+          codeText = cb.textContent || "";
+        }
+        const placeholder = `__AI_BRIDGE_CODE_BLOCK_${codeBlocks.length}__`;
+        codeBlocks.push("\n```" + (lang || "").toLowerCase() + "\n" + codeText.trimEnd() + "\n```\n");
+        cb.replaceWith(document.createTextNode(placeholder));
+      }
+
+      // 3. Convert standard <pre> blocks into markdown blocks
+      for (const pre of clone.querySelectorAll("pre")) {
+        const codeEl = pre.querySelector("code") || pre;
+        let lang = "";
+        const m = (codeEl.className || "").match(/language-([a-zA-Z0-9_-]+)/);
+        if (m) lang = m[1];
+        const codeText = codeEl.textContent || "";
+        const placeholder = `__AI_BRIDGE_CODE_BLOCK_${codeBlocks.length}__`;
+        codeBlocks.push("\n```" + lang + "\n" + codeText.trimEnd() + "\n```\n");
+        pre.replaceWith(document.createTextNode(placeholder));
+      }
+
+      // 3. Remove buttons, controls, action bars, svgs
+      for (const el of clone.querySelectorAll("button, [role='button'], .copy-button, [aria-label*='Copy' i], [data-testid*='copy' i], .turn-action-controls, svg, .ActionBar-KWWAct")) {
+        el.remove();
+      }
+
+      // 4. Attach clone temporarily offscreen to document.body with pre-wrap layout
+      clone.style.cssText = "position: absolute !important; left: -99999px !important; top: 0 !important; width: 800px !important; opacity: 0 !important; pointer-events: none !important; white-space: pre-wrap !important;";
+      for (const el of clone.querySelectorAll("p, div, span, blockquote")) {
+        el.style.whiteSpace = "pre-wrap";
+      }
+      document.body.appendChild(clone);
+      text = clone.innerText || clone.textContent || "";
+      clone.remove();
+
+      // 5. Restore pristine code blocks untouched by layout
+      text = text.replace(/__AI_BRIDGE_CODE_BLOCK_(\d+)__/g, (_match, idx) => {
+        return codeBlocks[Number(idx)] || "";
+      });
     } catch {
       text = visibleText(inner);
     }
@@ -221,22 +272,52 @@
       selection.addRange(range);
     } catch (_e) {}
 
+    // First: try document.execCommand insertText
     try {
-      input.dispatchEvent(new InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        inputType: "insertText",
-        data: prompt
-      }));
+      document.execCommand("insertText", false, prompt);
     } catch (_e) {}
 
-    const inserted = document.execCommand("insertText", false, prompt);
-    if (!inserted || !visibleText(input)) {
-      input.textContent = prompt;
+    const snippet = prompt.slice(0, 15);
+    let hasInserted = (input.innerText || input.textContent || "").includes(snippet);
+
+    // Second: try ClipboardEvent paste (handles Claude ProseMirror)
+    if (!hasInserted) {
+      try {
+        const dt = new DataTransfer();
+        dt.setData("text/plain", prompt);
+        input.dispatchEvent(new ClipboardEvent("paste", {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: dt
+        }));
+      } catch (_e) {}
+      hasInserted = (input.innerText || input.textContent || "").includes(snippet);
+    }
+
+    // Third: direct paragraph or text replacement
+    if (!hasInserted) {
+      const p = input.querySelector("p");
+      if (p) {
+        p.textContent = prompt;
+      } else {
+        input.textContent = prompt;
+      }
     }
 
     input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function clickElement(el) {
+    if (!el) return;
+    try {
+      const opts = { bubbles: true, cancelable: true, view: window };
+      el.dispatchEvent(new PointerEvent("pointerdown", opts));
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new PointerEvent("pointerup", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+    } catch (_e) {}
+    try { el.click(); } catch (_e) {}
   }
 
   async function submitPrompt(selectors, prompt) {
@@ -245,18 +326,19 @@
     if (!input) throw new Error("The AI chat box was not found on this tab. Ensure you are signed in.");
 
     await fillPrompt(input, prompt);
+    await wait(400);
 
     let clicked = false;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 25; i++) {
       let send = selectors?.send_btn ? firstVisible(selectors.send_btn) : null;
       if (!send) send = firstVisible(UNIVERSAL_SENDS);
 
       if (send && !send.disabled) {
-        send.click();
+        clickElement(send);
         clicked = true;
         break;
       }
-      await wait(100);
+      await wait(150);
     }
 
     if (!clicked) {
@@ -280,7 +362,7 @@
     }
   }
 
-  async function waitForAnswer(selectors, initialText, timeoutSeconds) {
+  async function waitForAnswer(selectors, initialText, initialCount, timeoutSeconds) {
     const deadline = Date.now() + Math.max(15, timeoutSeconds) * 1000;
     let started = false;
     let lastText = initialText;
@@ -289,28 +371,40 @@
 
     while (Date.now() < deadline) {
       const messages = findAssistantMessages(selectors);
+      const isNewTurn = messages.length > initialCount;
       const latestNode = messages.length ? messages[messages.length - 1] : null;
       const currentText = extractAssistantText(latestNode);
       const generating = isGenerating(selectors);
 
-      if (generating || (currentText && currentText !== initialText)) {
+      if (generating || isNewTurn || (currentText && currentText !== initialText)) {
         started = true;
       }
 
-      if (currentText && currentText !== lastText) {
-        lastText = currentText;
-        bestText = currentText;
-        stableSince = Date.now();
-      } else if (started && bestText && !generating) {
-        if ((Date.now() - stableSince) >= 2000) {
-          return bestText;
+      if (isNewTurn) {
+        if (currentText && currentText !== lastText) {
+          lastText = currentText;
+          bestText = currentText;
+          stableSince = Date.now();
+        } else if (currentText && (Date.now() - stableSince) >= 2000 && !generating) {
+          return currentText;
+        }
+      } else {
+        if (currentText && currentText !== lastText) {
+          lastText = currentText;
+          bestText = currentText;
+          stableSince = Date.now();
+        } else if (started && bestText && !generating) {
+          if ((Date.now() - stableSince) >= 2000) {
+            return bestText;
+          }
         }
       }
 
       await wait(500);
     }
 
-    if (bestText && bestText !== initialText) {
+    const finalMessages = findAssistantMessages(selectors);
+    if (bestText && (bestText !== initialText || finalMessages.length > initialCount)) {
       return bestText;
     }
     if (!started) throw new Error("The AI did not start a response before the timeout.");
@@ -336,7 +430,7 @@
         return {
           idx,
           len: text.length,
-          snippet: text.slice(0, 100)
+          snippet: text.slice(0, 150)
         };
       });
 
@@ -402,9 +496,10 @@
     // Initial assistant state before prompt
     const initialMessages = findAssistantMessages(selectors);
     const initialText = initialMessages.length ? extractAssistantText(initialMessages[initialMessages.length - 1]) : "";
+    const initialCount = initialMessages.length;
 
     await submitPrompt(selectors, job.prompt || "");
-    const text = await waitForAnswer(selectors, initialText, job.timeout || 300);
+    const text = await waitForAnswer(selectors, initialText, initialCount, job.timeout || 300);
     return { text, url: location.href, model: selected };
   }
 

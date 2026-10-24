@@ -2,6 +2,7 @@ const NATIVE_HOST = "com.ai_web_bridge.native";
 const DEFAULT_PORT = 8765;
 
 let isProcessing = false;
+let processingStartTime = 0;
 
 async function configuredPort() {
   const state = await chrome.storage.local.get(["port"]);
@@ -121,16 +122,7 @@ async function findOrCreateProviderTab(targetUrl) {
     return existingTab;
   }
 
-  // If no matching tab is open, create one automatically
-  const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
-  await waitForTabLoaded(newTab.id);
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  try {
-    const fresh = await chrome.tabs.get(newTab.id);
-    if (fresh?.url) return fresh;
-  } catch (_e) {}
-  if (!newTab.url) newTab.url = targetUrl;
-  return newTab;
+  return null;
 }
 
 async function executeJobOnTab(tab, portNumber) {
@@ -166,7 +158,15 @@ async function executeJobOnTab(tab, portNumber) {
 }
 
 async function pollForJobs() {
-  if (isProcessing) return;
+  if (isProcessing) {
+    if (Date.now() - processingStartTime > 90000) {
+      console.warn("[AI Web Bridge] Watchdog: resetting stuck isProcessing state.");
+      isProcessing = false;
+      chrome.action.setBadgeText({ text: "" });
+    } else {
+      return;
+    }
+  }
   const auto = await isAutoRunEnabled();
   if (!auto) return;
 
@@ -181,6 +181,7 @@ async function pollForJobs() {
 
   try {
     isProcessing = true;
+    processingStartTime = Date.now();
     chrome.action.setBadgeText({ text: "RUN" });
     chrome.action.setBadgeBackgroundColor({ color: "#155eef" });
 
@@ -196,6 +197,14 @@ async function pollForJobs() {
     chrome.action.setBadgeText({ text: "ERR" });
     chrome.action.setBadgeBackgroundColor({ color: "#d92d20" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 5000);
+    try {
+      const failResult = {
+        id: res.status?.id || "err",
+        error: error?.message || "Provider tab is not open.",
+        url: waitingUrl,
+      };
+      await sendNativeMessage({ action: "result", port: portNumber, result: failResult });
+    } catch (_e) {}
   }
 }
 

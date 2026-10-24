@@ -1,0 +1,7 @@
+Role: UI
+Goal: Build the presentation layer using only names and interfaces from the contract and engine.
+Rules:
+- Do not invent APIs, mock data shapes, or functions not present in the contract.
+- Keep DOM logic and styling clean, responsive, and robust without fixed-pixel height clipping.
+- Do not redesign the data layer. Integrate cleanly with the provided engine module.
+- Output complete code with zero placeholders or omissions.

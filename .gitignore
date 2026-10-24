@@ -63,5 +63,6 @@ Thumbs.db
 
 # ── Per-project bridge session metadata ────────────────────────
 .ai-web-bridge/
+.bridge/
 demo_*/
 demo-*/

@@ -97,7 +97,8 @@ def browser_settings(provider: dict[str, Any]) -> dict[str, Any]:
         profile_default = str(default_user_data_dir(browser_name))
     profile = Path(profile_override or profile_default).expanduser().resolve()
     executable = os.environ.get("BROWSER_EXE")
-    connection_mode = os.environ.get("BROWSER_MODE", "managed").strip().lower()
+    default_mode = "extension" if (Path.home() / ".ai-web-bridge" / "extension_token").exists() else "managed"
+    connection_mode = os.environ.get("BROWSER_MODE", default_mode).strip().lower()
     if connection_mode not in {"managed", "existing", "extension"}:
         raise ConfigurationError("BROWSER_MODE must be 'managed', 'existing', or 'extension'.")
     if connection_mode == "existing" and browser_name != "chrome":
