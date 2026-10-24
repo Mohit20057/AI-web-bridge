@@ -225,17 +225,28 @@
     button.click();
     await wait(400);
     const models = modelOptions(selectors);
+    const backdrop = document.querySelector(".cdk-overlay-backdrop, [class*='backdrop']");
+    if (backdrop) backdrop.click();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(300);
     return models;
   }
 
-  async function chooseModel(selectors, requested) {
-    if (!requested) return "";
+  const DEFAULT_FALLBACK_CHAINS = {
+    gemini: ["argon", "3.1 pro", "3.8 flash", "3.5 flash-lite", "pro", "flash"],
+    chatgpt: ["o1", "gpt-4o", "gpt-4o mini", "4o", "mini"],
+    claude: ["claude 3.5 sonnet", "claude 3 opus", "claude 3.5 haiku", "sonnet", "opus", "haiku"],
+    grok: ["grok 2", "grok 2 mini", "grok"],
+    blackbox: ["blackbox", "deepseek", "gpt-4o", "claude"]
+  };
+
+  async function chooseModel(selectors, requested, providerId) {
+    if (!requested) return { model: "", fallback_from: null, fallback_notice: null };
     let button = firstVisible(selectors?.model_btn);
     if (!button) {
       button = [...document.querySelectorAll("button")].find((item) => isVisible(item) && /model|mode|flash|sonnet|opus|gpt|pro/i.test(visibleText(item)));
     }
-    if (!button) return "";
+    if (!button) return { model: "", fallback_from: null, fallback_notice: null };
     button.click();
     await wait(400);
     const candidates = selectAll(selectors?.menu_item || "[role='menuitem'], [role='option'], [role='menuitemradio']")
@@ -244,14 +255,39 @@
       .filter((item) => item.label);
     const key = requested.toLocaleLowerCase().trim();
     const exact = candidates.filter((item) => item.label.toLocaleLowerCase() === key);
-    const matches = exact.length ? exact : candidates.filter((item) => item.label.toLocaleLowerCase().includes(key));
-    if (matches.length !== 1) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      return "";
+    let matches = exact.length ? exact : candidates.filter((item) => item.label.toLocaleLowerCase().includes(key));
+    if (matches.length >= 1) {
+      matches[0].node.click();
+      await wait(500);
+      return { model: matches[0].label, fallback_from: null, fallback_notice: null };
     }
-    matches[0].node.click();
-    await wait(500);
-    return matches[0].label;
+
+    // Try fallback chain
+    const chain = DEFAULT_FALLBACK_CHAINS[(providerId || "").toLowerCase()] || [];
+    let fallbackMatch = null;
+    for (const fbKey of chain) {
+      if (fbKey.toLowerCase() === key) continue;
+      const fbExact = candidates.filter((item) => item.label.toLocaleLowerCase() === fbKey);
+      const fbMatches = fbExact.length ? fbExact : candidates.filter((item) => item.label.toLocaleLowerCase().includes(fbKey));
+      if (fbMatches.length >= 1) {
+        fallbackMatch = fbMatches[0];
+        break;
+      }
+    }
+
+    if (fallbackMatch) {
+      fallbackMatch.node.click();
+      await wait(500);
+      const notice = `Requested model '${requested}' was not available in UI; switched to '${fallbackMatch.label}'.`;
+      return { model: fallbackMatch.label, fallback_from: requested, fallback_notice: notice };
+    }
+
+    const backdrop = document.querySelector(".cdk-overlay-backdrop, [class*='backdrop']");
+    if (backdrop) backdrop.click();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(300);
+    const fallbackNotice = `Requested model '${requested}' was not available in UI; using current active model.`;
+    return { model: "", fallback_from: requested, fallback_notice: fallbackNotice };
   }
 
   async function fillPrompt(input, prompt) {
@@ -304,14 +340,16 @@
       }
     }
 
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, composed: true, cancelable: true, inputType: "insertText", data: prompt }));
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: prompt }));
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 
   function clickElement(el) {
     if (!el) return;
     try {
-      const opts = { bubbles: true, cancelable: true, view: window };
+      const opts = { bubbles: true, cancelable: true, composed: true, view: window };
       el.dispatchEvent(new PointerEvent("pointerdown", opts));
       el.dispatchEvent(new MouseEvent("mousedown", opts));
       el.dispatchEvent(new PointerEvent("pointerup", opts));
@@ -321,6 +359,14 @@
   }
 
   async function submitPrompt(selectors, prompt) {
+    // Ensure no stale backdrop or overlay is blocking pointer events
+    const backdrops = document.querySelectorAll(".cdk-overlay-backdrop, [class*='backdrop']");
+    for (const bd of backdrops) {
+      try { bd.click(); } catch (_e) {}
+      try { bd.remove(); } catch (_e) {}
+    }
+    await wait(200);
+
     let input = selectors?.input ? firstVisible(selectors.input) : null;
     if (!input) input = firstVisible(UNIVERSAL_INPUTS);
     if (!input) throw new Error("The AI chat box was not found on this tab. Ensure you are signed in.");
@@ -491,7 +537,7 @@
     if (job.action !== "query") throw new Error("Unsupported request type.");
 
     if (job.new_chat) await startNewChat(selectors);
-    const selected = await chooseModel(selectors, job.model);
+    const modelChoice = await chooseModel(selectors, job.model, job.provider);
 
     // Initial assistant state before prompt
     const initialMessages = findAssistantMessages(selectors);
@@ -500,7 +546,12 @@
 
     await submitPrompt(selectors, job.prompt || "");
     const text = await waitForAnswer(selectors, initialText, initialCount, job.timeout || 300);
-    return { text, url: location.href, model: selected };
+    return {
+      text,
+      url: location.href,
+      model: modelChoice.model,
+      fallback_notice: modelChoice.fallback_notice,
+    };
   }
 
   function boundedResult(result) {

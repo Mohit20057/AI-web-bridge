@@ -245,10 +245,13 @@ class ExtensionBridge:
                         _write_json_line(connection, {
                             "ok": True,
                             "status": {
+                                "id": job.get("id"),
                                 "ready": owner._job is not None,
                                 "claimed": owner._claimed,
                                 "provider": job.get("provider"),
                                 "url": job.get("url"),
+                                "chat_url": job.get("chat_url"),
+                                "new_chat": job.get("new_chat", False),
                             },
                         })
                     return
@@ -256,16 +259,25 @@ class ExtensionBridge:
                     result = request.get("result")
                     with owner._condition:
                         if not owner._job or not owner._claimed:
+                            print(f"[ExtensionBridge DEBUG] result rejected: _job={bool(owner._job)} _claimed={owner._claimed}")
                             _write_json_line(connection, {"ok": False, "error": "No extension request is waiting for a result."})
                             return
                         if not isinstance(result, dict) or result.get("id") != owner._job["id"]:
+                            print(f"[ExtensionBridge DEBUG] result id mismatch: received={result.get('id') if isinstance(result, dict) else type(result)} expected={owner._job.get('id')}")
                             _write_json_line(connection, {"ok": False, "error": "The extension result does not match the waiting request."})
+                            return
+                        err_str = str(result.get("error", ""))
+                        if err_str and "already being handled" in err_str:
+                            _write_json_line(connection, {"ok": True})
                             return
                         owner._result = {
                             "text": str(result.get("text", ""))[:MAX_MESSAGE_BYTES],
                             "url": str(result.get("url", ""))[:4000],
                             "model": str(result.get("model", ""))[:300],
                             "error": str(result.get("error", ""))[:2000],
+                            "fallback_notice": str(result.get("fallback_notice", ""))[:1000]
+                            if result.get("fallback_notice")
+                            else None,
                             "models": [str(item)[:300] for item in result.get("models", [])[:100]]
                             if isinstance(result.get("models", []), list) else [],
                         }

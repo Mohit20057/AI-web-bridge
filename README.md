@@ -7,7 +7,7 @@
 **Use Gemini Argon, Claude Sonnet/Opus/Haiku, ChatGPT, Grok, and Blackbox directly from your terminal or AI coding agent — 100% Free, Zero API Keys, Hands-Free.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![Version: 2.0.0](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
+[![Version: 2.1.0](https://img.shields.io/badge/version-2.1.0-blue.svg)]()
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Browser: Chrome & Edge](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-brightgreen.svg)]()
 [![API Keys: None](https://img.shields.io/badge/API%20Keys-Zero%20Required-success.svg)]()
@@ -86,6 +86,8 @@ bridge handoff --to claude --goal "Refactor state engine"
 - **Ledger:** `.bridge/ledger.jsonl` records append-only facts (`git_before`, `git_after`, `verify`, `status`).
 - **Rolling Summary:** `.bridge/HANDOFF.md` maintains a compact ~1500 token state summary, auto-compacting older events.
 - **Auto-Sync:** Every command compares working tree and HEAD against the last checkpoint to track user modifications.
+- **Chat Continuity (No Tab Bloat):** Each project automatically binds to its dedicated chat thread URL per provider. Subsequent CLI runs reuse the exact same tab and conversation thread. Use `--new-chat` to rotate to a fresh thread without opening duplicate tabs.
+- **Model Fallback Cascade:** If a requested model (e.g. `argon`) is not exposed in the web UI, the bridge automatically cascades to the next best tier (`3.1 pro -> 3.8 flash -> 3.5 flash-lite`) and informs you in CLI output.
 
 ---
 

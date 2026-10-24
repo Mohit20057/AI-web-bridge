@@ -21,6 +21,7 @@ class SessionStore:
             else None
         )
         self.path = self.project_dir / ".ai-web-bridge" / "sessions.json"
+        self.bridge_sessions_path = self.project_dir / ".bridge" / "sessions.json"
         self.runs_path = self.project_dir / ".ai-web-bridge" / "runs.jsonl"
         self.handoff_path = self.project_dir / ".ai-web-bridge" / "handoff.json"
         self.usage_path = self.project_dir / ".ai-web-bridge" / "usage.jsonl"
@@ -117,25 +118,21 @@ class SessionStore:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(prefix="sessions-", suffix=".tmp", dir=self.path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump({"version": 1, "sessions": records}, stream, indent=2)
-                stream.write("\n")
-            os.replace(temp_name, self.path)
-        finally:
-            if os.path.exists(temp_name):
-                os.unlink(temp_name)
+        self._write_json_atomic(self.path, {"version": 1, "sessions": records})
+        if (self.project_dir / ".bridge").exists():
+            self._write_json_atomic(self.bridge_sessions_path, {"version": 1, "sessions": records})
 
     def _records(self) -> dict:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except (json.JSONDecodeError, OSError):
-            return {}
-        records = data.get("sessions", {}) if isinstance(data, dict) else {}
-        return records if isinstance(records, dict) else {}
+        records = {}
+        for p in (self.path, self.bridge_sessions_path):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                recs = data.get("sessions", {}) if isinstance(data, dict) else {}
+                if isinstance(recs, dict):
+                    records.update(recs)
+            except Exception:
+                pass
+        return records
 
     def _key(self, provider: str) -> str:
         scope = f":{self.profile_scope_id}" if self.profile_scope_id else ""

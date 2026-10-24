@@ -2,6 +2,7 @@ const NATIVE_HOST = "com.ai_web_bridge.native";
 const DEFAULT_PORT = 8765;
 
 let isProcessing = false;
+let isPolling = false;
 let processingStartTime = 0;
 
 async function configuredPort() {
@@ -105,16 +106,49 @@ function waitForTabLoaded(tabId, timeoutMs = 20000) {
   });
 }
 
-async function findOrCreateProviderTab(targetUrl) {
+async function activateTab(tab) {
+  if (!tab || !tab.id) return;
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    if (chrome.windows && tab.windowId) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+  } catch (_e) {}
+}
+
+async function findOrCreateProviderTab(targetUrl, chatUrl, isNewChat) {
   const tabs = await chrome.tabs.query({});
+
+  // 1. If we have a registered chat URL for this project and we are not starting a fresh chat:
+  if (chatUrl && !isNewChat) {
+    const chatNorm = chatUrl.split("?")[0].replace(/\/+$/, "").toLowerCase();
+    const exactTab = tabs.find((t) => t.url && t.url.split("?")[0].replace(/\/+$/, "").toLowerCase() === chatNorm);
+    if (exactTab && exactTab.id) {
+      await activateTab(exactTab);
+      return exactTab;
+    }
+  }
+
+  // 2. Look for open provider tab by host
   const existingTab = tabs.find((t) => t.url && hostsMatch(t.url, targetUrl));
   if (existingTab && existingTab.id) {
-    try {
-      await chrome.tabs.update(existingTab.id, { active: true });
-      if (chrome.windows && existingTab.windowId) {
-        await chrome.windows.update(existingTab.windowId, { focused: true });
+    await activateTab(existingTab);
+
+    // If we have a project chat URL and the tab is currently on a different URL, navigate it there
+    if (chatUrl && !isNewChat) {
+      const curNorm = (existingTab.url || "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+      const chatNorm = chatUrl.split("?")[0].replace(/\/+$/, "").toLowerCase();
+      if (curNorm !== chatNorm) {
+        try {
+          await chrome.tabs.update(existingTab.id, { url: chatUrl });
+          await waitForTabLoaded(existingTab.id, 10000);
+          await new Promise((r) => setTimeout(r, 1200));
+          const refreshed = await chrome.tabs.get(existingTab.id);
+          if (refreshed?.url) return refreshed;
+        } catch (_e) {}
       }
-    } catch (_e) {}
+    }
+
     try {
       const fresh = await chrome.tabs.get(existingTab.id);
       if (fresh?.url) return fresh;
@@ -122,7 +156,17 @@ async function findOrCreateProviderTab(targetUrl) {
     return existingTab;
   }
 
-  return null;
+  // 3. If no matching provider tab exists anywhere in the browser, create one
+  const destinationUrl = (!isNewChat && chatUrl) ? chatUrl : targetUrl;
+  const newTab = await chrome.tabs.create({ url: destinationUrl, active: true });
+  await waitForTabLoaded(newTab.id);
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  try {
+    const fresh = await chrome.tabs.get(newTab.id);
+    if (fresh?.url) return fresh;
+  } catch (_e) {}
+  if (!newTab.url) newTab.url = destinationUrl;
+  return newTab;
 }
 
 async function executeJobOnTab(tab, portNumber) {
@@ -139,6 +183,10 @@ async function executeJobOnTab(tab, portNumber) {
 
   const started = await sendNativeMessage({ action: "start", port: portNumber, tab_url: tabUrl });
   if (!started?.ok || !started.job) {
+    if (started?.error && started.error.includes("already being handled")) {
+      console.log("[AI Web Bridge] Request already claimed by another tick.");
+      return false;
+    }
     throw new Error(started?.error || "Could not claim the waiting request from local helper.");
   }
 
@@ -167,25 +215,30 @@ async function pollForJobs() {
       return;
     }
   }
-  const auto = await isAutoRunEnabled();
-  if (!auto) return;
-
-  const res = await getStatus();
-  if (!res.ok || !res.status?.ready || res.status.claimed) {
-    return;
-  }
-
-  const portNumber = await configuredPort();
-  const waitingUrl = res.status.url;
-  const provider = res.status.provider || "AI";
+  if (isPolling) return;
+  isPolling = true;
 
   try {
+    const auto = await isAutoRunEnabled();
+    if (!auto) return;
+
+    const res = await getStatus();
+    if (!res.ok || !res.status?.ready || res.status.claimed) {
+      return;
+    }
+
     isProcessing = true;
     processingStartTime = Date.now();
     chrome.action.setBadgeText({ text: "RUN" });
     chrome.action.setBadgeBackgroundColor({ color: "#155eef" });
 
-    const tab = await findOrCreateProviderTab(waitingUrl);
+    const portNumber = await configuredPort();
+    const waitingUrl = res.status.url;
+    const chatUrl = res.status.chat_url;
+    const isNewChat = Boolean(res.status.new_chat);
+    const provider = res.status.provider || "AI";
+
+    const tab = await findOrCreateProviderTab(waitingUrl, chatUrl, isNewChat);
     if (!tab || !tab.id) {
       throw new Error(`Could not find or open tab for ${provider} (${waitingUrl}).`);
     }
@@ -197,14 +250,8 @@ async function pollForJobs() {
     chrome.action.setBadgeText({ text: "ERR" });
     chrome.action.setBadgeBackgroundColor({ color: "#d92d20" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 5000);
-    try {
-      const failResult = {
-        id: res.status?.id || "err",
-        error: error?.message || "Provider tab is not open.",
-        url: waitingUrl,
-      };
-      await sendNativeMessage({ action: "result", port: portNumber, result: failResult });
-    } catch (_e) {}
+  } finally {
+    isPolling = false;
   }
 }
 

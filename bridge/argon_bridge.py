@@ -283,10 +283,13 @@ async def _execute_extension_query(
     read_latest: bool = False,
 ) -> str | list[str] | QueryResult:
     """Run a provider task through the installed extension and its local loopback broker."""
+    sessions = SessionStore(profile_scope=f"extension:{settings['name']}")
+    chat_url = None if new_chat else sessions.get_chat_url(provider_id)
     job = {
         "action": "read_latest" if read_latest else ("list_models" if list_only else "query"),
         "provider": provider_id,
         "url": provider_config["url"],
+        "chat_url": chat_url,
         "name": provider_config["name"],
         "selectors": provider_config["selectors"],
         "prompt": prompt,
@@ -301,6 +304,8 @@ async def _execute_extension_query(
         job,
         timeout=timeout + 120,
     )
+    if result.get("fallback_notice"):
+        print(f"[AI Web Bridge] Notice: {result['fallback_notice']}")
     if list_only:
         models = result.get("models", [])
         print("\nAvailable models:\n" + ("\n".join(f"  - {name}" for name in models) if models else "  (No model choices were detected.)"))
@@ -308,7 +313,6 @@ async def _execute_extension_query(
 
     response_text = result["text"]
     selected_model = result.get("model") or model
-    sessions = SessionStore(profile_scope=f"extension:{settings['name']}")
     if result.get("url"):
         sessions.save_chat_url(provider_id, result["url"])
     if record_run:
