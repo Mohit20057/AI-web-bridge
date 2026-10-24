@@ -11,10 +11,14 @@ CLI orchestrator connecting coding agents to logged-in browser AI models via loo
 2. Pass FILE PATHS by reference (`--task-file`, `--in`, `--context-files`), NEVER paste full file contents into prompts.
 3. Read ONLY the one-line CLI result and `bridge status`. Never inspect raw web UI responses.
 4. Always verify `verify=PASS` and `status=COMPLETE` before applying code changes.
+5. Conversation threads are automatically bound to the project without tab clutter. Pass `--new-chat` to rotate to a fresh thread.
+6. If a model tier is not in the provider's UI, the bridge automatically cascades to the next best tier.
 
 ## Trigger Workflows
-- **"use Argon web"** (Single query):
+- **"use Argon web"** (Single query with chat continuity):
   `bridge --provider gemini --prompt "..."` or `--task-file task.txt --out result.md`
+- **"start fresh chat with {AI}"**:
+  `bridge --provider {AI} --new-chat --prompt "..." --out result.md`
 - **"build X with the bridge"** (Relay pipeline: Claude architect -> ChatGPT engine -> Gemini ui -> verify -> review):
   `bridge --pipeline pipeline.yaml`
 - **"ask the council"** (Round 1 independent debate + Round 2 synthesis):
