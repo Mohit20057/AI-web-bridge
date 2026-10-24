@@ -15,7 +15,7 @@
 ::
 :: Usage:
 ::   Double-click this file, OR
-::   set CHROME_PROFILE_DIR=D:\MyProfile && launch_chrome.bat
+::   set CHROME_PROFILE_DIR=%USERPROFILE%\MyProfile && launch_chrome.bat
 :: ============================================================
 
 if not defined BROWSER (
